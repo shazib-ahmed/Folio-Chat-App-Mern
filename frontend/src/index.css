@@ -1,51 +1,84 @@
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,200..800;1,200..800&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 @layer base {
   :root {
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    
+    /* Seagull Palette */
+    --seagull-50: #eefbfd;
+    --seagull-100: #d3f3fa;
+    --seagull-200: #ade7f4;
+    --seagull-300: #54cae8;
+    --seagull-400: #34b7dc;
+    --seagull-500: #189bc2;
+    --seagull-600: #177ca3;
+    --seagull-700: #196485;
+    --seagull-800: #1d536d;
+    --seagull-900: #1d455c;
+    --seagull-950: #0d2d3f;
+
     --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
+    --foreground: 198 68% 15%; /* Based on seagull-950 */
     --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
+    --card-foreground: 198 68% 15%;
     --popover: 0 0% 100%;
-    --popover-foreground: 222.2 84% 4.9%;
-    --primary: 221.2 83.2% 53.3%;
-    --primary-foreground: 210 40% 98%;
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
-    --accent: 210 40% 96.1%;
-    --accent-foreground: 222.2 47.4% 11.2%;
+    --popover-foreground: 198 68% 15%;
+    --primary: 198 68% 31%; /* seagull-700: #196485 */
+    --primary-foreground: 0 0% 100%;
+    --secondary: 198 68% 96%; /* seagull-50 */
+    --secondary-foreground: 198 68% 15%;
+    --muted: 198 30% 96%;
+    --muted-foreground: 198 20% 40%;
+    --accent: 198 68% 90%;
+    --accent-foreground: 198 68% 20%;
     --destructive: 0 84.2% 60.2%;
     --destructive-foreground: 210 40% 98%;
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 221.2 83.2% 53.3%;
+    --border: 198 30% 90%;
+    --input: 198 30% 90%;
+    --ring: 198 68% 31%;
     --radius: 0.5rem;
+
+    --sidebar-bg: 0 0% 100%;
+    --sidebar-header-bg: 198 68% 98%;
+    --chat-header-bg: 198 68% 98%;
+    --chat-bg: 198 68% 98%;
+    --input-bg: 0 0% 100%;
+    --bubble-me: 198 68% 31%;
+    --bubble-other: 0 0% 100%;
   }
 
   .dark {
-    --background: 222.2 84% 4.9%;
-    --foreground: 210 40% 98%;
-    --card: 222.2 84% 4.9%;
-    --card-foreground: 210 40% 98%;
-    --popover: 222.2 84% 4.9%;
-    --popover-foreground: 210 40% 98%;
-    --primary: 217.2 91.2% 59.8%;
-    --primary-foreground: 222.2 47.4% 11.2%;
-    --secondary: 217.2 32.6% 17.5%;
-    --secondary-foreground: 210 40% 98%;
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
-    --accent: 217.2 32.6% 17.5%;
-    --accent-foreground: 210 40% 98%;
+    --background: 201 66% 12%; /* #09202c - Slightly darker than seagull-950 for depth */
+    --foreground: 191 66% 90%; /* #d3f3fa - seagull-100 */
+    --card: 201 52% 18%; /* #1d455c - seagull-900 */
+    --card-foreground: 191 66% 90%;
+    --popover: 201 52% 18%;
+    --popover-foreground: 191 66% 90%;
+    --primary: 193 78% 62%; /* #54cae8 - seagull-300 */
+    --primary-foreground: 201 66% 10%;
+    --secondary: 201 52% 25%; /* seagull-800 */
+    --secondary-foreground: 191 66% 90%;
+    --muted: 201 52% 22%;
+    --muted-foreground: 191 20% 70%;
+    --accent: 193 78% 30%; /* Much darker blue for active/hover state in dark mode */
+    --accent-foreground: 191 66% 95%; /* Light text for dark accent */
     --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
-    --ring: 224.3 76.3% 48%;
+    --destructive-foreground: 191 66% 90%;
+    --border: 201 52% 25%;
+    --input: 201 52% 25%;
+    --ring: 193 78% 62%;
+
+    --sidebar-bg: 201 52% 15%; /* #153345 */
+    --sidebar-header-bg: 201 52% 18%;
+    --chat-header-bg: 201 52% 18%;
+    --chat-bg: 201 66% 10%;
+    --input-bg: 201 52% 18%;
+    --bubble-me: 193 78% 46%;
+    --bubble-other: 201 52% 25%;
   }
 }
 
