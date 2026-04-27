@@ -1,11 +1,14 @@
 import React from 'react';
-import { BrowserRouter as Router, Routes, Route, useParams } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, useParams, Navigate, useLocation } from 'react-router-dom';
 import { ChatSidebar } from '@/features/chat/components/ChatSidebar';
 import { ChatWindow } from '@/features/chat/components/ChatWindow';
 import { AuthPage } from '@/features/auth/pages/AuthPage';
+import { ProfileSettings } from '@/features/settings/components/ProfileSettings';
+import { CredentialsSettings } from '@/features/settings/components/CredentialsSettings';
 import { usePageTitle } from '@/shared/hooks/usePageTitle';
 import { Chat, Message } from '@/features/chat/types';
 import { cn } from '@/shared/lib/utils';
+import { Card, CardContent, CardHeader, CardTitle } from '@/shared/ui/card';
 
 const MOCK_CHATS: Chat[] = [
   {
@@ -81,9 +84,20 @@ const MOCK_MESSAGES: Message[] = [
 
 function ChatLayout() {
   const { chatId } = useParams<{ chatId: string }>();
+  const { pathname } = useLocation();
   const activeChat = MOCK_CHATS.find(c => c.id === chatId);
   
-  usePageTitle(activeChat ? `${activeChat.name} | Folio Chat` : "Folio | Chat Platform");
+  const isSettingsRoute = ['/profile', '/credentials', '/settings'].includes(pathname);
+
+  const getPageTitle = () => {
+    if (activeChat) return `${activeChat.name} | Folio Chat`;
+    if (pathname === '/profile') return "Profile | Folio Chat";
+    if (pathname === '/credentials') return "Credentials | Folio Chat";
+    if (pathname === '/settings') return "Settings | Folio Chat";
+    return "Folio | Chat Platform";
+  };
+
+  usePageTitle(getPageTitle());
 
   // For demo purposes, we only show messages for Elon
   const messages = chatId === 'elon-musk' ? MOCK_MESSAGES : [];
@@ -92,7 +106,7 @@ function ChatLayout() {
     <div className="h-screen w-screen flex overflow-hidden bg-background">
       <div className={cn(
         "h-full border-r bg-[hsl(var(--sidebar-bg))] transition-all duration-300",
-        chatId ? "hidden lg:block lg:w-[400px]" : "w-full lg:w-[400px]"
+        (chatId || isSettingsRoute) ? "hidden lg:block lg:w-[400px]" : "w-full lg:w-[400px]"
       )}>
         <ChatSidebar 
           chats={MOCK_CHATS} 
@@ -101,12 +115,37 @@ function ChatLayout() {
       </div>
       <div className={cn(
         "flex-1 h-full transition-all duration-300",
-        chatId ? "block w-full" : "hidden lg:block"
+        (chatId || isSettingsRoute) ? "block w-full" : "hidden lg:block"
       )}>
-        <ChatWindow 
-          chat={activeChat} 
-          messages={messages} 
-        />
+        {isSettingsRoute ? (
+           <div className="flex-1 h-full flex flex-col items-center justify-center p-8 bg-[hsl(var(--chat-bg))] relative overflow-hidden">
+              <div 
+                className="absolute inset-0 opacity-[0.03] pointer-events-none bg-repeat"
+                style={{ backgroundImage: `url('https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png')` }}
+              />
+              <Card className="w-full max-w-2xl border-border/40 shadow-xl bg-card/50 backdrop-blur-sm relative z-10">
+                <CardHeader>
+                  <CardTitle className="text-2xl capitalize">{pathname.replace('/', '')}</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {pathname === '/profile' && <ProfileSettings />}
+                  {pathname === '/credentials' && <CredentialsSettings />}
+                  {pathname === '/settings' && (
+                    <div className="py-12 text-center space-y-4">
+                      <div className="text-4xl">🚀</div>
+                      <h3 className="text-xl font-semibold">Coming Soon</h3>
+                      <p className="text-muted-foreground max-w-xs mx-auto text-sm">We are working hard to bring you more advanced customization options. Stay tuned!</p>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+           </div>
+        ) : (
+          <ChatWindow 
+            chat={activeChat} 
+            messages={messages} 
+          />
+        )}
       </div>
     </div>
   );
@@ -119,6 +158,9 @@ function App() {
         <Route path="/auth" element={<AuthPage />} />
         <Route path="/" element={<ChatLayout />} />
         <Route path="/messages/:chatId" element={<ChatLayout />} />
+        <Route path="/profile" element={<ChatLayout />} />
+        <Route path="/credentials" element={<ChatLayout />} />
+        <Route path="/settings" element={<ChatLayout />} />
       </Routes>
     </Router>
   );

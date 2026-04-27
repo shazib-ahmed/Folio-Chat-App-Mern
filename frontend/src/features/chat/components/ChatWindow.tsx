@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Avatar, AvatarFallback, AvatarImage } from "@/shared/ui/avatar";
 import { ScrollArea } from "@/shared/ui/scroll-area";
 import { Input } from "@/shared/ui/input";
@@ -23,6 +23,19 @@ interface ChatWindowProps {
 export function ChatWindow({ chat, messages }: ChatWindowProps) {
   const [inputText, setInputText] = useState("");
   const navigate = useNavigate();
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  const scrollToBottom = () => {
+    setTimeout(() => {
+      if (scrollRef.current) {
+        scrollRef.current.scrollIntoView({ behavior: 'smooth', block: 'end' });
+      }
+    }, 100);
+  };
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages, chat?.id]);
 
   if (!chat) {
     return (
@@ -95,6 +108,7 @@ export function ChatWindow({ chat, messages }: ChatWindowProps) {
                 isMe={msg.senderId === 'me'} 
               />
             ))}
+            <div ref={scrollRef} />
           </div>
         </ScrollArea>
       </div>
