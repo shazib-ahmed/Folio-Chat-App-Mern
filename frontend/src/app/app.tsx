@@ -5,6 +5,7 @@ import { ChatWindow } from '@/features/chat/components/ChatWindow';
 import { AuthPage } from '@/features/auth/pages/AuthPage';
 import { usePageTitle } from '@/shared/hooks/usePageTitle';
 import { Chat, Message } from '@/features/chat/types';
+import { cn } from '@/shared/lib/utils';
 
 const MOCK_CHATS: Chat[] = [
   {
@@ -89,14 +90,24 @@ function ChatLayout() {
 
   return (
     <div className="h-screen w-screen flex overflow-hidden bg-background">
-      <ChatSidebar 
-        chats={MOCK_CHATS} 
-        activeChatId={chatId} 
-      />
-      <ChatWindow 
-        chat={activeChat} 
-        messages={messages} 
-      />
+      <div className={cn(
+        "h-full border-r bg-[hsl(var(--sidebar-bg))] transition-all duration-300",
+        chatId ? "hidden lg:block lg:w-[400px]" : "w-full lg:w-[400px]"
+      )}>
+        <ChatSidebar 
+          chats={MOCK_CHATS} 
+          activeChatId={chatId} 
+        />
+      </div>
+      <div className={cn(
+        "flex-1 h-full transition-all duration-300",
+        chatId ? "block w-full" : "hidden lg:block"
+      )}>
+        <ChatWindow 
+          chat={activeChat} 
+          messages={messages} 
+        />
+      </div>
     </div>
   );
 }

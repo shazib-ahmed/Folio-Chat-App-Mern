@@ -5,7 +5,7 @@ import { Input } from "@/shared/ui/input";
 import { Button } from "@/shared/ui/button";
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faMessage } from '@fortawesome/free-regular-svg-icons';
-import { faEllipsisVertical, faFilter, faSearch } from '@fortawesome/free-solid-svg-icons';
+import { faEllipsisVertical, faFilter, faSearch, faRightFromBracket } from '@fortawesome/free-solid-svg-icons';
 import { Avatar, AvatarFallback, AvatarImage } from "@/shared/ui/avatar";
 import { ChatListItem } from "./ChatListItem";
 import { Chat } from "../types";
@@ -24,7 +24,7 @@ export function ChatSidebar({ chats, activeChatId }: ChatSidebarProps) {
   };
 
   return (
-    <div className="w-[380px] h-full flex flex-col border-r bg-[hsl(var(--sidebar-bg))] text-foreground">
+    <div className="w-full h-full flex flex-col border-r bg-[hsl(var(--sidebar-bg))] text-foreground">
       {/* Header */}
       <div className="h-[60px] bg-[hsl(var(--sidebar-header-bg))] px-4 flex items-center justify-between shrink-0">
         <Avatar className="h-10 w-10">
@@ -36,8 +36,8 @@ export function ChatSidebar({ chats, activeChatId }: ChatSidebarProps) {
           <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-foreground">
              <FontAwesomeIcon icon={faMessage} className="h-5 w-5 cursor-pointer" />
           </Button>
-          <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-foreground">
-            <FontAwesomeIcon icon={faEllipsisVertical} className="h-5 w-5 cursor-pointer" />
+          <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-destructive transition-colors">
+            <FontAwesomeIcon icon={faRightFromBracket} className="h-5 w-5 cursor-pointer" />
           </Button>
         </div>
       </div>

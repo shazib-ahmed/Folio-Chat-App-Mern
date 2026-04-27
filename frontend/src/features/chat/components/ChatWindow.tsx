@@ -2,10 +2,12 @@ import React, { useState } from 'react';
 import { Avatar, AvatarFallback, AvatarImage } from "@/shared/ui/avatar";
 import { ScrollArea } from "@/shared/ui/scroll-area";
 import { Input } from "@/shared/ui/input";
+import { Button } from "@/shared/ui/button";
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faEllipsisVertical, faSearch, faFaceSmile, faPaperclip, faMicrophone, faPaperPlane, faImage, faFile, faCamera, faUser } from '@fortawesome/free-solid-svg-icons';
+import { faEllipsisVertical, faSearch, faFaceSmile, faPaperclip, faMicrophone, faPaperPlane, faImage, faFile, faCamera, faUser, faArrowLeft } from '@fortawesome/free-solid-svg-icons';
 import { MessageBubble } from "./MessageBubble";
 import { Chat, Message } from "../types";
+import { useNavigate } from "react-router-dom";
 import { 
   DropdownMenu, 
   DropdownMenuContent, 
@@ -20,6 +22,7 @@ interface ChatWindowProps {
 
 export function ChatWindow({ chat, messages }: ChatWindowProps) {
   const [inputText, setInputText] = useState("");
+  const navigate = useNavigate();
 
   if (!chat) {
     return (
@@ -52,6 +55,14 @@ export function ChatWindow({ chat, messages }: ChatWindowProps) {
       {/* Header */}
       <div className="h-[60px] bg-[hsl(var(--chat-header-bg))] px-4 flex items-center justify-between shrink-0 border-b">
         <div className="flex items-center gap-3">
+          <Button 
+            variant="ghost" 
+            size="icon" 
+            className="lg:hidden text-muted-foreground hover:text-foreground -ml-2"
+            onClick={() => navigate('/')}
+          >
+            <FontAwesomeIcon icon={faArrowLeft} className="h-5 w-5" />
+          </Button>
           <Avatar className="h-10 w-10">
             <AvatarImage src={chat.avatar} />
             <AvatarFallback>{chat.name.substring(0, 2).toUpperCase()}</AvatarFallback>
