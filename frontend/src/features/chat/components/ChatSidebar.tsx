@@ -75,9 +75,6 @@ export function ChatSidebar({ chats, activeChatId }: ChatSidebarProps) {
                   placeholder="Search or start new chat" 
                   className="border-none bg-transparent shadow-none focus-visible:ring-0 placeholder:text-muted-foreground text-sm h-9"
                 />
-                <div className="pr-3">
-                  <FontAwesomeIcon icon={faFilter} className="h-3.5 w-3.5 text-muted-foreground" />
-                </div>
               </div>
             </div>
             
