@@ -5,7 +5,7 @@ import { ScrollArea } from "@/shared/ui/scroll-area";
 import { Input } from "@/shared/ui/input";
 import { Button } from "@/shared/ui/button";
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faEllipsisVertical, faFilter, faSearch, faRightFromBracket, faGear, faUser, faShieldHalved, faArrowLeft } from '@fortawesome/free-solid-svg-icons';
+import { faSearch, faRightFromBracket, faGear, faUser, faShieldHalved, faArrowLeft } from '@fortawesome/free-solid-svg-icons';
 import { Avatar, AvatarFallback, AvatarImage } from "@/shared/ui/avatar";
 import { ChatListItem } from "./ChatListItem";
 import { Chat } from "../types";
