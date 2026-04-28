@@ -89,6 +89,10 @@ export function ChatSidebar({ chats, activeChatId }: ChatSidebarProps) {
     } catch (err) {
       console.error('Logout error:', err);
     } finally {
+      // Explicitly disconnect socket on logout
+      const { disconnectSocket } = await import('@/shared/lib/socket');
+      disconnectSocket();
+      
       dispatch(logout());
       navigate('/auth');
     }

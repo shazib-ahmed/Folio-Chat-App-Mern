@@ -21,50 +21,70 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   constructor(private prisma: PrismaService) {}
 
-  // Map to track connected users: userId -> socketId
-  private connectedUsers: Map<number, string> = new Map();
+  // Map to track connected users: userId -> Set of socketIds
+  private connectedUsers: Map<number, Set<string>> = new Map();
+  // Map for fast lookup: socketId -> userId
+  private socketToUser: Map<string, number> = new Map();
 
   async handleConnection(client: Socket) {
     const userId = client.handshake.query.userId;
     if (userId && !isNaN(Number(userId))) {
       const uId = Number(userId);
-      this.connectedUsers.set(uId, client.id);
       
-      // Update database status
-      await this.prisma.user.update({
-        where: { id: uId },
-        data: { isOnline: true }
-      });
+      // Add to user's sockets
+      if (!this.connectedUsers.has(uId)) {
+        this.connectedUsers.set(uId, new Set());
+      }
+      this.connectedUsers.get(uId)!.add(client.id);
+      this.socketToUser.set(client.id, uId);
+      
+      // Update database status only if this is the first connection
+      if (this.connectedUsers.get(uId)!.size === 1) {
+        await this.prisma.user.update({
+          where: { id: uId },
+          data: { isOnline: true }
+        });
 
-      // Broadcast status change
-      this.server.emit('userStatus', { userId: uId, isOnline: true });
+        // Broadcast status change
+        this.server.emit('userStatus', { userId: uId, isOnline: true });
+        console.log(`User ${uId} is now online (first tab connected)`);
+      }
       
-      console.log(`User connected: ${userId} with socketId: ${client.id}`);
+      console.log(`Socket connected: ${client.id} for user: ${uId}. Total sockets: ${this.connectedUsers.get(uId)!.size}`);
     }
   }
 
   async handleDisconnect(client: Socket) {
-    // Find and remove the user from the map
-    for (const [userId, socketId] of this.connectedUsers.entries()) {
-      if (socketId === client.id) {
-        this.connectedUsers.delete(userId);
+    const userId = this.socketToUser.get(client.id);
+    
+    if (userId) {
+      this.socketToUser.delete(client.id);
+      
+      const userSockets = this.connectedUsers.get(userId);
+      if (userSockets) {
+        userSockets.delete(client.id);
         
-        // Update database status
-        const lastSeen = new Date();
-        await this.prisma.user.update({
-          where: { id: userId },
-          data: { isOnline: false, lastSeen }
-        });
+        // If no more sockets for this user, they are truly offline
+        if (userSockets.size === 0) {
+          this.connectedUsers.delete(userId);
+          
+          const lastSeen = new Date();
+          await this.prisma.user.update({
+            where: { id: userId },
+            data: { isOnline: false, lastSeen }
+          });
 
-        // Broadcast status change
-        this.server.emit('userStatus', { 
-          userId, 
-          isOnline: false, 
-          lastSeen: this.formatTime(lastSeen) 
-        });
-        
-        console.log(`User disconnected: ${userId}`);
-        break;
+          // Broadcast status change
+          this.server.emit('userStatus', { 
+            userId, 
+            isOnline: false, 
+            lastSeen: this.formatTime(lastSeen) 
+          });
+          
+          console.log(`User ${userId} is now offline (all tabs closed)`);
+        } else {
+          console.log(`Socket disconnected: ${client.id} for user: ${userId}. Remaining sockets: ${userSockets.size}`);
+        }
       }
     }
   }
@@ -88,14 +108,18 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   @SubscribeMessage('join')
   handleJoin(@MessageBody() data: { userId: number }, @ConnectedSocket() client: Socket) {
-    this.connectedUsers.set(data.userId, client.id);
+    if (!this.connectedUsers.has(data.userId)) {
+      this.connectedUsers.set(data.userId, new Set());
+    }
+    this.connectedUsers.get(data.userId)!.add(client.id);
+    this.socketToUser.set(client.id, data.userId);
     console.log(`User ${data.userId} explicitly joined with socket ${client.id}`);
   }
 
   sendMessageToUser(userId: number, event: string, payload: any) {
     const socketId = this.connectedUsers.get(userId);
     if (socketId) {
-      this.server.to(socketId).emit(event, payload);
+      this.server.to(Array.from(socketId)).emit(event, payload);
     }
   }
 

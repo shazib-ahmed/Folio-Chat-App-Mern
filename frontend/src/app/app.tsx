@@ -36,7 +36,15 @@ function ChatLayout() {
     if (user?.id) {
       initiateSocketConnection(user.id);
     }
+
+    const handleBeforeUnload = () => {
+      disconnectSocket();
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
     return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
       disconnectSocket();
     };
   }, [user?.id]);
