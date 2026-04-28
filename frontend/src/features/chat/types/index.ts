@@ -18,6 +18,7 @@ export interface Message {
 export interface Chat {
   id: string;
   name: string;
+  username: string;
   avatar: string;
   lastMessage?: string;
   lastMessageTime?: string;

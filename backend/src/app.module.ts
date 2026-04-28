@@ -3,6 +3,7 @@ import { ConfigModule } from '@nestjs/config';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { AuthModule } from './modules/auth/auth.module';
+import { ChatModule } from './modules/chat/chat.module';
 import { DatabaseModule } from './database/database.module';
 import { RedirectMiddleware } from './common/middlewares/redirect.middleware';
 
@@ -13,6 +14,7 @@ import { RedirectMiddleware } from './common/middlewares/redirect.middleware';
     }),
     DatabaseModule,
     AuthModule,
+    ChatModule,
   ],
   controllers: [AppController],
   providers: [AppService],

@@ -16,35 +16,11 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/shared/ui/card';
 import { Button } from '@/shared/ui/button';
 import { ScrollArea } from '@/shared/ui/scroll-area';
 import { ProtectedRoute, PublicRoute } from '@/routes/ProtectedRoute';
+import { useDispatch, useSelector } from 'react-redux';
+import { RootState, AppDispatch } from '@/app/store';
+import { fetchChatList } from '@/features/chat/chatSlice';
+import { getUserByUsernameApi } from '@/features/chat/chatService';
 
-const MOCK_CHATS: Chat[] = [
-  {
-    id: 'elon-musk',
-    name: 'Elon Musk',
-    avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Elon',
-    lastMessage: 'Hey, did you see the new rocket launch?',
-    lastMessageTime: '12:45 PM',
-    unreadCount: 2,
-    online: true,
-  },
-  {
-    id: 'jeff-bezos',
-    name: 'Jeff Bezos',
-    avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Jeff',
-    lastMessage: 'Amazon is going to the moon soon.',
-    lastMessageTime: 'Yesterday',
-    online: false,
-  },
-  {
-    id: 'mark-zuckerberg',
-    name: 'Mark Zuckerberg',
-    avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Mark',
-    lastMessage: 'Let\'s talk about the Metaverse.',
-    lastMessageTime: 'Monday',
-    unreadCount: 0,
-    online: true,
-  },
-];
 
 const MOCK_MESSAGES: Message[] = [
   { id: '1', senderId: 'elon-musk', text: 'Hey, how is the project going?', timestamp: '12:30 PM', status: 'read' },
@@ -89,14 +65,49 @@ const MOCK_MESSAGES: Message[] = [
   },
 ];
 
+
+
 function ChatLayout() {
-  const { chatId } = useParams<{ chatId: string }>();
+  const { chatId } = useParams<{ chatId: string }>(); // This is now a username
   const { pathname } = useLocation();
   const navigate = useNavigate();
+  const dispatch = useDispatch<AppDispatch>();
+  const { chats } = useSelector((state: RootState) => state.chat);
   const [activeAudioCall, setActiveAudioCall] = React.useState<Chat | null>(null);
   const [activeVideoCall, setActiveVideoCall] = React.useState<Chat | null>(null);
+  const [selectedUser, setSelectedUser] = React.useState<Chat | undefined>(undefined);
   
-  const activeChat = MOCK_CHATS.find(c => c.id === chatId);
+  React.useEffect(() => {
+    dispatch(fetchChatList());
+  }, [dispatch]);
+
+  React.useEffect(() => {
+    if (chatId) {
+      const chatInList = chats.find(c => c.id === chatId || c.username === chatId);
+      if (chatInList) {
+        setSelectedUser(chatInList);
+      } else {
+        // Fetch user info if not in chat list (e.g. from search)
+        getUserByUsernameApi(chatId).then(user => {
+          if (user) {
+            setSelectedUser({
+              id: user.username,
+              name: user.name || user.username,
+              username: user.username,
+              avatar: user.avatar,
+              online: user.isOnline,
+              lastMessage: '',
+              lastMessageTime: '',
+            });
+          }
+        }).catch(err => console.error('Failed to fetch user:', err));
+      }
+    } else {
+      setSelectedUser(undefined);
+    }
+  }, [chatId, chats]);
+
+  const activeChat = selectedUser;
   
   const isSettingsRoute = ['/profile', '/credentials', '/settings'].includes(pathname);
   const isSubSettingsRoute = ['/profile', '/credentials'].includes(pathname);
@@ -111,7 +122,7 @@ function ChatLayout() {
 
   usePageTitle(getPageTitle());
 
-  // For demo purposes, we only show messages for Elon
+  // For now, we still use mock messages or empty if no real ones
   const messages = chatId === 'elon-musk' ? MOCK_MESSAGES : [];
 
   const getHeaderTitle = () => {
@@ -127,7 +138,7 @@ function ChatLayout() {
         (chatId || isSubSettingsRoute) ? "hidden lg:block lg:w-[400px]" : "w-full lg:w-[400px]"
       )}>
         <ChatSidebar 
-          chats={MOCK_CHATS} 
+          chats={chats} 
           activeChatId={chatId} 
         />
       </div>
