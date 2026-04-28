@@ -2,7 +2,7 @@ import React, { useState, useRef } from 'react';
 import { cn } from "@/shared/lib/utils";
 import { Message } from "../types";
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faCheckDouble, faFileLines, faDownload, faClock, faPlay, faPause, faMicrophone } from '@fortawesome/free-solid-svg-icons';
+import { faCheckDouble, faFileLines, faDownload, faClock, faPlay, faPause, faMicrophone, faXmark } from '@fortawesome/free-solid-svg-icons';
 import { Button } from '@/shared/ui/button';
 
 interface MessageBubbleProps {
@@ -92,6 +92,7 @@ const VoiceMessage = React.memo(({ url, isMe }: { url: string; isMe?: boolean })
 });
 
 export const MessageBubble = React.memo(({ message, isMe }: MessageBubbleProps) => {
+  const [isImageModalOpen, setIsImageModalOpen] = useState(false);
   return (
     <div className={cn(
       "flex w-full mb-2",
@@ -122,8 +123,33 @@ export const MessageBubble = React.memo(({ message, isMe }: MessageBubbleProps) 
               src={message.fileUrl || message.text} 
               alt="Sent" 
               className="w-full h-auto max-h-[400px] object-cover cursor-pointer hover:opacity-95 transition-opacity"
-              onClick={() => window.open(message.fileUrl || message.text, '_blank')}
+              onClick={() => setIsImageModalOpen(true)}
             />
+          </div>
+        )}
+
+        {isImageModalOpen && (
+          <div 
+            className="fixed inset-0 z-[9999] bg-black/90 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-300"
+            onClick={(e) => {
+              e.stopPropagation();
+              setIsImageModalOpen(false);
+            }}
+          >
+            <div className="relative max-w-[90vw] max-h-[90vh] flex items-center justify-center">
+              <img 
+                src={message.fileUrl || message.text} 
+                alt="Full view" 
+                className="max-w-full max-h-[90vh] object-contain rounded-lg shadow-2xl animate-in zoom-in duration-300"
+                onClick={(e) => e.stopPropagation()}
+              />
+              <button 
+                className="absolute top-[-50px] right-0 md:right-[-50px] md:top-0 text-white hover:text-primary transition-colors text-2xl p-2 h-12 w-12 flex items-center justify-center bg-white/10 hover:bg-white/20 rounded-full"
+                onClick={() => setIsImageModalOpen(false)}
+              >
+                <FontAwesomeIcon icon={faXmark} />
+              </button>
+            </div>
           </div>
         )}
 
