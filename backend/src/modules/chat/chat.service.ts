@@ -154,11 +154,14 @@ export class ChatService {
       data: { status: 'ACCEPTED' }
     });
 
-    // Notify the requester
-    this.chatGateway.sendMessageToUser(otherId, 'chatRequestAccepted', {
-      acceptedBy: userId,
-      chatRoomId: chatRoomIdStr
-    });
+    // Notify both the requester and the accepter
+    const payload = {
+      acceptedBy: userId.toString(),
+      chatRoomId: chatRoomIdStr,
+      status: 'ACCEPTED'
+    };
+    this.chatGateway.sendMessageToUser(otherId, 'chatRequestAccepted', payload);
+    this.chatGateway.sendMessageToUser(userId, 'chatRequestAccepted', payload);
 
     return { success: true };
   }

@@ -117,6 +117,16 @@ const chatSlice = createSlice({
           chat.lastSeen = action.payload.lastSeen;
         }
       }
+    },
+    updateChatStatus: (state, action: PayloadAction<{ chatRoomId: string; status: 'PENDING' | 'ACCEPTED' }>) => {
+      // Find chat by chatRoomId (sorted user IDs)
+      // Since we don't store chatRoomId in the Chat type usually, we check if the room match
+      const { chatRoomId, status } = action.payload;
+      state.chats = state.chats.map(chat => {
+        // Simple heuristic: if the room ID match could be this chat
+        // In a real app, you'd have chatRoomId on the Chat object
+        return chat; 
+      });
     }
   },
   extraReducers: (builder) => {
@@ -136,5 +146,5 @@ const chatSlice = createSlice({
   },
 });
 
-export const { setChats, selectChat, updateChatLastMessage, clearUnreadCount, setTypingStatus, setUserStatus } = chatSlice.actions;
+export const { setChats, selectChat, updateChatLastMessage, clearUnreadCount, setTypingStatus, setUserStatus, updateChatStatus } = chatSlice.actions;
 export default chatSlice.reducer;

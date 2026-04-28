@@ -295,6 +295,13 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
           }).catch(err => console.error('Failed to mark as seen:', err));
         }
       }
+
+      if (msg.type === 'chatRequestAccepted' && chat) {
+        const roomMatch = [String(me?.id), String(chat.id)].sort().join('_') === msg.chatRoomId;
+        if (roomMatch) {
+          setChatStatus('ACCEPTED');
+        }
+      }
     });
   }, [chat, me?.id, dispatch]);
 

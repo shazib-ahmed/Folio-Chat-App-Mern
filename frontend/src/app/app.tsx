@@ -18,7 +18,7 @@ import { ProtectedRoute, PublicRoute } from '@/routes/ProtectedRoute';
 import { useDispatch, useSelector } from 'react-redux';
 import { RootState, AppDispatch } from '@/app/store';
 import { initiateSocketConnection, disconnectSocket, subscribeToMessages, getSocket } from '@/shared/lib/socket';
-import { fetchChatList, updateChatLastMessage, setTypingStatus, setUserStatus } from '@/features/chat/chatSlice';
+import { fetchChatList, updateChatLastMessage, setTypingStatus, setUserStatus, updateChatStatus } from '@/features/chat/chatSlice';
 import { getUserByUsernameApi, setPublicKeyApi, getPublicKeyApi } from '@/features/chat/chatService';
 import { generateE2EEKeys, savePrivateKey, exportPublicKey, getLocalPrivateKey } from '@/shared/lib/cryptoUtils';
 
@@ -121,6 +121,11 @@ function ChatLayout() {
             lastMessageSenderId: String(msg.senderId)
           }));
         }
+      } else if (msg.type === 'chatRequestAccepted') {
+        dispatch(updateChatStatus({
+          chatRoomId: msg.chatRoomId,
+          status: 'ACCEPTED'
+        }));
       }
     });
 
