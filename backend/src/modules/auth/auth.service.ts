@@ -4,6 +4,7 @@ import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { UpdatePasswordDto } from './dto/update-password.dto';
+import { CloudinaryService } from '../cloudinary/cloudinary.service';
 import * as bcrypt from 'bcrypt';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
@@ -14,6 +15,7 @@ export class AuthService {
     private prisma: PrismaService,
     private jwtService: JwtService,
     private configService: ConfigService,
+    private cloudinary: CloudinaryService,
   ) {}
 
   async register(dto: RegisterDto) {
@@ -155,7 +157,25 @@ export class AuthService {
     };
   }
 
-  async updateProfile(userId: number, dto: UpdateProfileDto) {
+  async updateProfile(userId: number, dto: UpdateProfileDto, file?: Express.Multer.File) {
+    console.log(`UpdateProfile request for user ${userId}. File present: ${!!file}`);
+    // Handle avatar upload if file is provided
+    if (file) {
+      try {
+        const upload = await this.cloudinary.uploadImage(file, 'users');
+        dto.avatar = upload.secure_url;
+        console.log(`Avatar uploaded to Cloudinary: ${dto.avatar}`);
+      } catch (error) {
+        console.error('Failed to upload avatar to Cloudinary:', error);
+      }
+    } else if (dto.avatar && typeof dto.avatar !== 'string') {
+      // If avatar is coming as an object from multipart but no file was processed
+      console.log('Removing non-string avatar field from DTO');
+      delete dto.avatar;
+    }
+
+    console.log('Final DTO for Prisma update:', dto);
+
     // Check if email already exists for another user
     if (dto.email) {
       const existingEmail = await this.prisma.user.findFirst({

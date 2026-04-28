@@ -1,5 +1,5 @@
-import { Body, Controller, Post, HttpCode, HttpStatus, UseInterceptors, UseGuards, Req, Patch } from '@nestjs/common';
-import { AnyFilesInterceptor } from '@nestjs/platform-express';
+import { Body, Controller, Post, HttpCode, HttpStatus, UseInterceptors, UseGuards, Req, Patch, UploadedFile } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
@@ -10,7 +10,6 @@ import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import * as express from 'express';
 
 @Controller('auth')
-@UseInterceptors(AnyFilesInterceptor())
 export class AuthController {
   constructor(private authService: AuthService) {}
 
@@ -41,9 +40,20 @@ export class AuthController {
 
   @UseGuards(JwtAuthGuard)
   @Patch('profile')
-  updateProfile(@Req() req: express.Request, @Body() dto: UpdateProfileDto) {
+  @UseInterceptors(FileInterceptor('avatar'))
+  updateProfile(
+    @Req() req: express.Request, 
+    @Body() dto: UpdateProfileDto,
+    @UploadedFile() file: Express.Multer.File
+  ) {
+    console.log(`Auth.updateProfile: Received file: ${!!file}`);
+    if (file) {
+      console.log(` - File name: ${file.originalname}, size: ${file.size}`);
+    }
+    console.log('Auth.updateProfile: DTO keys:', Object.keys(dto));
+    
     const user = req.user as any;
-    return this.authService.updateProfile(user.userId, dto);
+    return this.authService.updateProfile(user.userId, dto, file);
   }
 
   @UseGuards(JwtAuthGuard)

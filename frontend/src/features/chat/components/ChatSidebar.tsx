@@ -61,8 +61,8 @@ export function ChatSidebar({ chats, activeChatId }: ChatSidebarProps) {
     <div className="w-full h-full flex flex-col border-r bg-[hsl(var(--sidebar-bg))] text-foreground">
       {/* Header */}
       <div className="h-[60px] bg-[hsl(var(--sidebar-header-bg))] px-4 flex items-center justify-between shrink-0">
-        <Avatar className="h-10 w-10">
-          <AvatarImage src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${user?.username || 'user'}`} />
+        <Avatar className="h-10 w-10 border border-primary/20">
+          <AvatarImage src={user?.avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user?.username || 'user'}`} />
           <AvatarFallback>{user?.username?.substring(0, 2).toUpperCase() || 'US'}</AvatarFallback>
         </Avatar>
         <div className="flex gap-2 items-center text-muted-foreground">

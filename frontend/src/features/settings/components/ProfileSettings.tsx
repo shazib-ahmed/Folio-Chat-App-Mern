@@ -15,7 +15,8 @@ export function ProfileSettings() {
   const { user } = useSelector((state: RootState) => state.auth);
   const dispatch = useDispatch();
   const fileInputRef = React.useRef<HTMLInputElement>(null);
-  const [avatar, setAvatar] = React.useState(user?.avatar || "");
+  const [avatarPreview, setAvatarPreview] = React.useState(user?.avatar || "");
+  const [selectedFile, setSelectedFile] = React.useState<File | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [success, setSuccess] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -26,6 +27,12 @@ export function ProfileSettings() {
     phone: user?.phone || '',
     country: user?.country || '',
   });
+
+  useEffect(() => {
+    if (user?.avatar) {
+      setAvatarPreview(user.avatar);
+    }
+  }, [user?.avatar]);
 
   useEffect(() => {
     if (success) {
@@ -54,9 +61,10 @@ export function ProfileSettings() {
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
+      setSelectedFile(file);
       const reader = new FileReader();
       reader.onloadend = () => {
-        setAvatar(reader.result as string);
+        setAvatarPreview(reader.result as string);
       };
       reader.readAsDataURL(file);
     }
@@ -69,11 +77,25 @@ export function ProfileSettings() {
     setSuccess(false);
 
     try {
-      const updatedUser = await updateProfileApi({
-        ...formData,
-        avatar
+      const data = new FormData();
+      Object.entries(formData).forEach(([key, value]) => {
+        data.append(key, value);
       });
+      
+      if (selectedFile) {
+        data.append('avatar', selectedFile);
+        console.log('Appending avatar file to FormData:', selectedFile.name);
+      }
+
+      console.log('Sending Profile Update FormData...');
+      data.forEach((value, key) => {
+        console.log(key + ': ' + (value instanceof File ? `File (${value.name})` : value));
+      });
+
+      const updatedUser = await updateProfileApi(data);
       dispatch(updateUser(updatedUser));
+      setAvatarPreview(updatedUser.avatar);
+      setSelectedFile(null);
       setSuccess(true);
     } catch (err: any) {
       const errorMessage = err.response?.data?.message || err.message || "Failed to update profile";
@@ -102,7 +124,7 @@ export function ProfileSettings() {
       <div className="flex flex-col items-center gap-4">
         <div className="relative group">
           <Avatar className="h-24 w-24 border-2 border-primary/20">
-            <AvatarImage src={avatar} />
+            <AvatarImage src={avatarPreview} />
             <AvatarFallback>{getInitials(user?.name)}</AvatarFallback>
           </Avatar>
           <button 

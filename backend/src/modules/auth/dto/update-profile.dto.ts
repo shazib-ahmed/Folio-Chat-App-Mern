@@ -21,7 +21,6 @@ export class UpdateProfileDto {
   @IsOptional()
   country?: string;
 
-  @IsString()
   @IsOptional()
   avatar?: string;
 }
