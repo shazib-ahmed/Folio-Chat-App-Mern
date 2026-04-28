@@ -12,12 +12,34 @@ export class ChatService {
     private cloudinaryService: CloudinaryService,
   ) {}
 
-  async sendMessage(senderId: number, receiverId: number, content: string, type: MessageType, file?: Express.Multer.File, isEncrypted: boolean = false, clientMsgId?: string) {
-    let fileUrl: string | null = null;
-    let fileName: string | null = null;
-    let fileSize: string | null = null;
+  async uploadFile(file: Express.Multer.File) {
+    const upload = await this.cloudinaryService.uploadFile(file, 'messages');
+    return {
+      fileUrl: upload.secure_url,
+      fileName: file.originalname,
+      fileSize: `${(file.size / 1024 / 1024).toFixed(2)} MB`
+    };
+  }
 
-    if (file) {
+  async sendMessage(
+    senderId: number, 
+    receiverId: number, 
+    content: string, 
+    type: MessageType, 
+    file?: Express.Multer.File, 
+    isEncrypted: boolean = false, 
+    clientMsgId?: string,
+    providedFileUrl?: string,
+    providedFileName?: string,
+    providedFileSize?: string
+  ) {
+    console.log('DEBUG: sendMessage incoming:', { isEncrypted, providedFileUrl: !!providedFileUrl, providedFileName: !!providedFileName });
+    
+    let fileUrl: string | null = providedFileUrl || null;
+    let fileName: string | null = providedFileName || null;
+    let fileSize: string | null = providedFileSize || null;
+
+    if (file && !fileUrl) {
       const upload = await this.cloudinaryService.uploadFile(file, 'messages');
       fileUrl = upload.secure_url;
       fileName = file.originalname;
@@ -26,10 +48,6 @@ export class ChatService {
 
     const chatRoom = await this.getOrCreateChatRoom(senderId, receiverId, senderId);
     
-    // Check if the chat is accepted or if it's the very first message
-    // Messenger allows the first message to be sent even if pending
-    // But we should mark it as ACCEPTED if it was already accepted
-
     const message = await this.prisma.message.create({
       data: {
         senderId,
@@ -261,6 +279,23 @@ export class ChatService {
   }
 
   private formatLastMessage(msg: any): string {
+    if (msg.isEncrypted && msg.message) {
+      try {
+        const parsed = JSON.parse(msg.message);
+        if (parsed.fileMeta || (parsed.iv && (parsed.r || parsed.s))) {
+          // It's an E2EE file/attachment
+          const typeLabels: any = { 'IMAGE': '📷 Photo', 'VIDEO': '🎥 Video', 'AUDIO': '🎵 Audio', 'FILE': '📄 File' };
+          return typeLabels[msg.messageType] || '📄 Attachment';
+        } else if (parsed.text) {
+          // Wrapped text: { text: "...", fileMeta: "..." }
+          // We can't decrypt it here, so we return it. Frontend will decrypt if it can.
+          return parsed.text;
+        }
+      } catch (e) {
+        // Not JSON, return as is
+      }
+    }
+
     if (msg.messageType === 'IMAGE') return '📷 Photo';
     if (msg.messageType === 'VIDEO') return '🎥 Video';
     if (msg.messageType === 'AUDIO') return '🎵 Audio';
@@ -310,14 +345,18 @@ export class ChatService {
             }
           });
 
+          const isMine = msg.senderId === userId;
+          const displayMessage = this.formatLastMessage(msg);
+
           chatList.push({
             id: otherUser.id.toString(),
             name: otherUser.name || otherUser.username,
             username: otherUser.username,
             avatar: otherUser.avatar,
-            lastMessage: msg.isEncrypted ? msg.message : ((msg.senderId === userId ? "You: " : "") + this.formatLastMessage(msg)),
+            lastMessage: (isMine ? "You: " : "") + displayMessage,
             lastMessageSenderId: msg.senderId.toString(),
             lastMessageTime: this.formatTime(msg.createdAt),
+            lastMessageType: msg.messageType,
             online: otherUser.isOnline,
             unreadCount: unreadCount,
             isEncrypted: msg.isEncrypted,

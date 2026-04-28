@@ -105,22 +105,35 @@ function ChatLayout() {
       }
 
       // Handle New Messages
-      if (msg.type === 'newMessage') {
-        const isMine = String(msg.senderId) === String(user.id);
-        const sidebarChatId = isMine ? msg.receiverId : msg.senderId;
+			if (msg.type === 'newMessage') {
+				const isMine = String(msg.senderId) === String(user.id);
+				const sidebarChatId = isMine ? msg.receiverId : msg.senderId;
 
-        if (sidebarChatId) {
-          dispatch(updateChatLastMessage({
-            chatId: String(sidebarChatId),
-            message: msg.sidebarText || msg.text || '',
-            time: msg.timestamp,
-            isMine: isMine,
-            sender: msg.sender,
-            receiver: msg.receiver,
-            isEncrypted: msg.isEncrypted,
-            lastMessageSenderId: String(msg.senderId)
-          }));
-        }
+				if (sidebarChatId) {
+					let displayMessage = msg.sidebarText || msg.text || '';
+					
+					// Handle E2EE file/audio display in sidebar
+					if (msg.isEncrypted && msg.messageType !== 'TEXT') {
+						const typeLabels: Record<string, string> = {
+							'IMAGE': '📷 Photo',
+							'VIDEO': '🎥 Video',
+							'AUDIO': '🎵 Audio',
+							'FILE': '📄 File'
+						};
+						displayMessage = typeLabels[msg.messageType] || '📄 Attachment';
+					}
+
+					dispatch(updateChatLastMessage({
+						chatId: String(sidebarChatId),
+						message: displayMessage,
+						time: msg.timestamp,
+						isMine: isMine,
+						sender: msg.sender,
+						receiver: msg.receiver,
+						isEncrypted: msg.isEncrypted,
+						lastMessageSenderId: String(msg.senderId)
+					}));
+				}
       } else if (msg.type === 'chatRequestAccepted') {
         dispatch(updateChatStatus({
           chatRoomId: msg.chatRoomId,

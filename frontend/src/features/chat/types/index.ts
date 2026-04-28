@@ -25,6 +25,7 @@ export interface Message {
     size?: string;
   };
   isEncrypted?: boolean;
+  fileMeta?: string;
 }
 
 export interface Chat {
@@ -34,6 +35,7 @@ export interface Chat {
   avatar: string;
   lastMessage?: string;
   lastMessageSenderId?: string;
+  lastMessageType?: 'TEXT' | 'IMAGE' | 'VIDEO' | 'AUDIO' | 'FILE';
   isEncrypted?: boolean;
   lastMessageTime?: string;
   unreadCount?: number;

@@ -9,8 +9,8 @@ import { MessageBubble } from "./MessageBubble";
 import { Chat, Message } from "../types";
 import { cn } from "@/shared/lib/utils";
 
-import { getMessagesApi, sendMessageApi, markSeenApi, blockUserApi, unblockUserApi, acceptRequestApi, searchMessagesApi, getPublicKeyApi } from '../chatService';
-import { encryptForBoth, decryptMessage, getLocalPrivateKey } from '@/shared/lib/cryptoUtils';
+import { getMessagesApi, sendMessageApi, markSeenApi, blockUserApi, unblockUserApi, acceptRequestApi, searchMessagesApi, getPublicKeyApi, uploadFileApi } from '../chatService';
+import { encryptForBoth, decryptMessage, getLocalPrivateKey, encryptFileForBoth } from '@/shared/lib/cryptoUtils';
 import { subscribeToMessages, getSocket } from '@/shared/lib/socket';
 import { useSelector, useDispatch } from 'react-redux';
 import { RootState, AppDispatch } from '@/app/store';
@@ -97,11 +97,39 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
       (getMessagesApi(chat.username) as Promise<any>).then(async data => {
         const privateKey = await getLocalPrivateKey();
         const decryptedMessages = await Promise.all((data.messages || []).map(async (msg: any) => {
+          let decryptedText = msg.text;
+          let fileMeta = "";
+
           if (msg.isEncrypted && privateKey && msg.text) {
-            const isSender = String(msg.senderId) === String(me?.id);
-            return { ...msg, text: await decryptMessage(msg.text, privateKey, isSender) };
+            try {
+              let cipherText = msg.text;
+              try {
+                const parsed = JSON.parse(msg.text);
+                if (parsed.fileMeta) {
+                  cipherText = parsed.text || "";
+                  fileMeta = parsed.fileMeta;
+                } else if (parsed.iv && (parsed.r || parsed.s)) {
+                  cipherText = "";
+                  fileMeta = msg.text;
+                }
+              } catch (e) {
+                if (msg.messageType !== 'TEXT') {
+                  fileMeta = msg.text;
+                  cipherText = "";
+                }
+              }
+
+              const isSender = String(msg.senderId) === String(me?.id);
+              if (cipherText && cipherText !== "[Unable to decrypt message]") {
+                decryptedText = await decryptMessage(cipherText, privateKey, isSender);
+              } else {
+                decryptedText = "";
+              }
+            } catch (err) {
+              console.error('History decryption failed:', err);
+            }
           }
-          return msg;
+          return { ...msg, text: decryptedText, fileMeta };
         }));
 
         setLocalMessages(decryptedMessages);
@@ -237,11 +265,37 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
         
         const privateKey = await getLocalPrivateKey();
         let decryptedText = msg.text;
+        let fileMeta = "";
 
         if (msg.isEncrypted && msg.text && privateKey) {
           try {
+            let cipherText = msg.text;
+            // Check if it's the JSON format
+            try {
+              const parsed = JSON.parse(msg.text);
+              if (parsed.fileMeta) {
+                // Wrapped format: { text: "...", fileMeta: "..." }
+                cipherText = parsed.text || "";
+                fileMeta = parsed.fileMeta;
+              } else if (parsed.iv && (parsed.r || parsed.s)) {
+                // Direct metadata format: { r: "...", s: "...", iv: "..." }
+                cipherText = "";
+                fileMeta = msg.text;
+              }
+            } catch (e) {
+              // Not JSON: treat as plain encrypted text or fallback for files
+              if (msg.messageType !== 'TEXT') {
+                fileMeta = msg.text;
+                cipherText = "";
+              }
+            }
+
             const isSender = String(msg.senderId) === String(me?.id);
-            decryptedText = await decryptMessage(msg.text, privateKey, isSender);
+            if (cipherText && cipherText !== "[Unable to decrypt message]") {
+              decryptedText = await decryptMessage(cipherText, privateKey, isSender);
+            } else {
+              decryptedText = "";
+            }
           } catch (err) {
             console.error('Real-time decryption failed:', err);
           }
@@ -249,7 +303,8 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
 
         const decryptedMsg = { 
           ...msg,
-          text: decryptedText
+          text: decryptedText,
+          fileMeta // Attach fileMeta for MessageBubble to use
         };
 
         setLocalMessages(prev => {
@@ -356,82 +411,74 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
       setRequesterId(String(me.id));
     }
 
-    let finalMessage = inputText;
-    let isEncrypted = false;
-
-    // Encrypt message if public keys are available
-    if (recipientPublicKey && myPublicKey && inputText.trim()) {
-      try {
-        finalMessage = await encryptForBoth(inputText, recipientPublicKey, myPublicKey);
-        isEncrypted = true;
-      } catch (err) {
-        console.error("Encryption failed, sending as plain text:", err);
-      }
-    }
-
-    const formData = new FormData();
-    formData.append('receiverId', chat.id);
-    formData.append('message', finalMessage);
-    formData.append('isEncrypted', isEncrypted.toString());
-    
-    if (audioBlob) {
-      formData.append('type', 'AUDIO');
-      formData.append('file', audioBlob, 'voice-note.webm');
-      setIsUploading(true);
-    } else if (selectedFile) {
-      const type = selectedFile.type.split('/')[0].toUpperCase();
-      const mappedType = ['IMAGE', 'VIDEO', 'AUDIO'].includes(type) ? type : 'FILE';
-      formData.append('type', mappedType);
-      formData.append('file', selectedFile);
-      setIsUploading(true);
-    } else {
-      formData.append('type', 'TEXT');
-    }
-
-    const clientMsgId = `cmsg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    const fileToUpload = selectedFile || (audioBlob ? new File([audioBlob], 'voice-note.webm', { type: 'audio/webm' }) : undefined);
     const mappedType = audioBlob ? 'AUDIO' : (selectedFile ? (['IMAGE', 'VIDEO', 'AUDIO'].includes(selectedFile.type.split('/')[0].toUpperCase()) ? selectedFile.type.split('/')[0].toUpperCase() as any : 'FILE') : 'TEXT');
+    const clientMsgId = `cmsg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
+    const originalName = fileToUpload?.name || "";
+    const originalSize = audioBlob ? `${(audioBlob.size / 1024).toFixed(1)} KB` : (selectedFile ? `${(selectedFile.size / 1024 / 1024).toFixed(2)} MB` : "Unknown");
+    const currentPreview = audioBlob ? URL.createObjectURL(audioBlob) : (filePreview || undefined);
+
+    // 1. OPTIMISTIC UPDATE
+    const optimisticMsg: Message = {
+      id: clientMsgId,
+      senderId: me.id.toString(),
+      text: inputText,
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      status: 'pending' as any,
+      messageType: mappedType,
+      fileUrl: currentPreview,
+      fileName: audioBlob ? 'Voice Note' : selectedFile?.name,
+      fileSize: originalSize,
+      isEncrypted: !!(recipientPublicKey && myPublicKey)
+    };
+    setLocalMessages(prev => [...prev, optimisticMsg]);
+
+    // 2. CLEAR INPUTS
+    const lastInput = inputText;
+    const lastFile = fileToUpload;
+    setInputText("");
+    removeSelectedFile();
+    if (fileToUpload) setIsUploading(true);
+
+    // 3. SENDING LOGIC
     try {
-      // Optimistic Update
-      const optimisticMsg: Message = {
-        id: clientMsgId,
-        senderId: me.id.toString(),
-        text: inputText,
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        status: 'pending' as any,
-        messageType: mappedType,
-        fileUrl: audioBlob ? URL.createObjectURL(audioBlob) : (filePreview || undefined),
-        fileName: audioBlob ? 'Voice Note' : selectedFile?.name,
-        fileSize: audioBlob ? `${(audioBlob.size / 1024).toFixed(1)} KB` : (selectedFile ? `${(selectedFile.size / 1024 / 1024).toFixed(2)} MB` : undefined),
-        isEncrypted: isEncrypted
-      };
+      if (recipientPublicKey && myPublicKey) {
+        // --- ENCRYPTED FLOW ---
+        let finalMessage = "";
+        let fileMetadata = "";
 
-      setLocalMessages(prev => [...prev, optimisticMsg]);
-      const lastText = inputText;
-      setInputText("");
-      removeSelectedFile();
+        if (lastInput.trim()) {
+          finalMessage = await encryptForBoth(lastInput, recipientPublicKey, myPublicKey);
+        }
 
-      const response = await sendMessageApi(
-        chat.id, 
-        finalMessage, 
-        mappedType, 
-        audioBlob ? (new File([audioBlob], 'voice-note.webm')) : selectedFile || undefined, 
-        isEncrypted, 
-        clientMsgId
-      );
-      
-      // The socket listener will handle the replacement, but we can also do it here for extra safety
-      // But we must decrypt the response if it's encrypted
-      const privateKey = await getLocalPrivateKey();
-      const decryptedRes = {
-        ...response,
-        text: (response.isEncrypted && privateKey) ? await decryptMessage(response.message, privateKey, true) : (response.message || lastText)
-      };
-      setLocalMessages(prev => prev.map(m => m.id === clientMsgId ? decryptedRes : m));
+        if (lastFile) {
+          const { encryptedBlob, encryptedMetadata } = await encryptFileForBoth(
+            lastFile, originalName, originalSize, recipientPublicKey, myPublicKey
+          );
+          const uploadRes = await uploadFileApi(new File([encryptedBlob], "encrypted-file", { type: lastFile.type }));
+          const encryptedFileUrl = await encryptForBoth(uploadRes.fileUrl, recipientPublicKey, myPublicKey);
+          const encryptedFileName = await encryptForBoth(originalName, recipientPublicKey, myPublicKey);
+          
+          fileMetadata = encryptedMetadata;
+          const payload = lastInput.trim() ? JSON.stringify({ text: finalMessage, fileMeta: fileMetadata }) : fileMetadata;
+          
+          const response = await sendMessageApi(chat.id, payload, mappedType, undefined, true, clientMsgId, encryptedFileUrl, encryptedFileName, originalSize);
+          setLocalMessages(prev => prev.map(m => m.id === clientMsgId ? { ...response, text: lastInput } : m));
+        } else {
+          // Text only
+          const response = await sendMessageApi(chat.id, finalMessage, 'TEXT', undefined, true, clientMsgId);
+          setLocalMessages(prev => prev.map(m => m.id === clientMsgId ? { ...response, text: lastInput } : m));
+        }
+      } else {
+        // --- PLAIN FLOW ---
+        const response = await sendMessageApi(chat.id, lastInput, mappedType, lastFile, false, clientMsgId);
+        setLocalMessages(prev => prev.map(m => m.id === clientMsgId ? response : m));
+      }
     } catch (err: any) {
-      console.error('Failed to send message:', err);
+      console.error('Send failed:', err);
       setLocalMessages(prev => prev.filter(m => m.id !== clientMsgId));
-      alert(err.response?.data?.message || err.message || "Failed to send message. You might be blocked.");
+      alert(err.response?.data?.message || err.message || "Failed to send message.");
     } finally {
       setIsUploading(false);
     }
@@ -568,11 +615,39 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
       if (data.messages && data.messages.length > 0) {
         const privateKey = await getLocalPrivateKey();
         const decryptedMessages = await Promise.all(data.messages.map(async (msg: any) => {
+          let decryptedText = msg.text;
+          let fileMeta = "";
+
           if (msg.isEncrypted && privateKey && msg.text) {
-            const isSender = String(msg.senderId) === String(me?.id);
-            return { ...msg, text: await decryptMessage(msg.text, privateKey, isSender) };
+            try {
+              let cipherText = msg.text;
+              try {
+                const parsed = JSON.parse(msg.text);
+                if (parsed.fileMeta) {
+                  cipherText = parsed.text || "";
+                  fileMeta = parsed.fileMeta;
+                } else if (parsed.iv && (parsed.r || parsed.s)) {
+                  cipherText = "";
+                  fileMeta = msg.text;
+                }
+              } catch (e) {
+                if (msg.messageType !== 'TEXT') {
+                  fileMeta = msg.text;
+                  cipherText = "";
+                }
+              }
+
+              const isSender = String(msg.senderId) === String(me?.id);
+              if (cipherText && cipherText !== "[Unable to decrypt message]") {
+                decryptedText = await decryptMessage(cipherText, privateKey, isSender);
+              } else {
+                decryptedText = "";
+              }
+            } catch (err) {
+              console.error('Load more decryption failed:', err);
+            }
           }
-          return msg;
+          return { ...msg, text: decryptedText, fileMeta };
         }));
 
         setLocalMessages(prev => [...decryptedMessages, ...prev]);

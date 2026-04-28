@@ -13,6 +13,26 @@ const KEY_PAIR_ALGORITHM = {
 const DB_NAME = "FolioChatCrypto";
 const STORE_NAME = "keys";
 
+// --- Base64 Helpers ---
+const b64Encode = (bytes: Uint8Array): string => {
+  let binary = '';
+  const len = bytes.byteLength;
+  for (let i = 0; i < len; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return window.btoa(binary);
+};
+
+const b64Decode = (str: string): Uint8Array => {
+  const binary = window.atob(str);
+  const len = binary.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
+};
+
 // --- IndexedDB Storage ---
 
 const getDB = (): Promise<IDBDatabase> => {
@@ -124,39 +144,34 @@ export const encryptForBoth = async (text: string, recipientPubKeyPem: string, s
     exportedAesKey
   );
 
-  // 4. Combine: IV(12) | SenderKey(256) | RecipientKey(256) | Content
-  const combined = new Uint8Array(12 + 256 + 256 + encryptedContent.byteLength);
-  combined.set(iv, 0);
-  combined.set(new Uint8Array(encryptedAesKeySender), 12);
-  combined.set(new Uint8Array(encryptedAesKeyRecipient), 12 + 256);
-  combined.set(new Uint8Array(encryptedContent), 12 + 256 + 256);
-
-  return uint8ArrayToBase64(combined);
+  // 4. Return as JSON string for easy detection and parsing
+  return JSON.stringify({
+    iv: uint8ArrayToBase64(iv),
+    s: uint8ArrayToBase64(new Uint8Array(encryptedAesKeySender)),
+    r: uint8ArrayToBase64(new Uint8Array(encryptedAesKeyRecipient)),
+    c: uint8ArrayToBase64(new Uint8Array(encryptedContent))
+  });
 };
 
-export const decryptMessage = async (base64Cipher: string, privateKey: CryptoKey, isSender: boolean): Promise<string> => {
+export const decryptMessage = async (jsonCipher: string, privateKey: CryptoKey, isSender: boolean): Promise<string> => {
   try {
-    const combined = base64ToUint8Array(base64Cipher);
+    const data = JSON.parse(jsonCipher);
+    if (!data.iv || !data.c || (!data.r && !data.s)) throw new Error("Invalid cipher format");
 
-    const iv = combined.slice(0, 12);
-    
-    // Pick the correct encrypted AES key based on whether we are the sender or receiver
-    const encryptedAesKey = isSender 
-      ? combined.slice(12, 12 + 256) 
-      : combined.slice(12 + 256, 12 + 256 + 256);
-      
-    const encryptedContent = combined.slice(12 + 256 + 256);
+    const iv = base64ToUint8Array(data.iv);
+    const encryptedAesKeyB64 = isSender ? data.s : data.r;
+    const encryptedContent = base64ToUint8Array(data.c);
 
     // 1. Decrypt AES key with RSA
     const decryptedAesKeyRaw = await window.crypto.subtle.decrypt(
       { name: "RSA-OAEP" },
       privateKey,
-      encryptedAesKey
+      base64ToUint8Array(encryptedAesKeyB64) as any
     );
 
     const aesKey = await window.crypto.subtle.importKey(
       "raw",
-      decryptedAesKeyRaw,
+      decryptedAesKeyRaw as any,
       { name: "AES-GCM" },
       false,
       ["decrypt"]
@@ -164,18 +179,144 @@ export const decryptMessage = async (base64Cipher: string, privateKey: CryptoKey
 
     // 2. Decrypt content with AES
     const decryptedContent = await window.crypto.subtle.decrypt(
-      { name: "AES-GCM", iv },
-      aesKey,
-      encryptedContent
+      { name: "AES-GCM", iv: iv as any },
+      aesKey as any,
+      encryptedContent as any
     );
 
-    return new TextDecoder().decode(decryptedContent);
+    return new TextDecoder().decode(decryptedContent as any);
   } catch (error: any) {
-    console.error("Decryption failed detail:", {
-      error: error.message || error,
-      cipherLength: base64Cipher.length,
-      name: error.name
-    });
+    console.error("Decryption failed:", error);
     return "[Unable to decrypt message]";
   }
+};
+
+/**
+ * Encrypts a file (Blob) for both sender and recipient
+ */
+export const encryptFileForBoth = async (
+  file: Blob, 
+  fileName: string,
+  fileSize: string,
+  recipientPublicKeyPem: string, 
+  myPublicKeyPem: string
+): Promise<{ encryptedBlob: Blob; encryptedMetadata: string }> => {
+  const recipientPublicKey = await importPublicKey(recipientPublicKeyPem);
+  const myPublicKey = await importPublicKey(myPublicKeyPem);
+
+  // 1. Generate a random AES key for this file
+  const aesKey = await window.crypto.subtle.generateKey(
+    { name: 'AES-GCM', length: 256 },
+    true,
+    ['encrypt', 'decrypt']
+  );
+
+  // 2. Export the AES key to wrap it
+  const exportedAesKey = await window.crypto.subtle.exportKey('raw', aesKey);
+
+  // 3. Encrypt the AES key for both recipient and sender
+  const encryptedKeyForRecipient = await window.crypto.subtle.encrypt(
+    { name: 'RSA-OAEP' },
+    recipientPublicKey,
+    exportedAesKey
+  );
+
+  const encryptedKeyForMe = await window.crypto.subtle.encrypt(
+    { name: 'RSA-OAEP' },
+    myPublicKey,
+    exportedAesKey
+  );
+
+  // 4. Encrypt the file content with AES
+  const iv = window.crypto.getRandomValues(new Uint8Array(12));
+  const fileArrayBuffer = await file.arrayBuffer();
+  const encryptedContent = await window.crypto.subtle.encrypt(
+    { name: 'AES-GCM', iv },
+    aesKey,
+    fileArrayBuffer
+  );
+
+  // 5. Encrypt Metadata (Name and Size) using same AES key
+  const metaEncoder = new TextEncoder();
+  const metaData = JSON.stringify({ name: fileName, size: fileSize });
+  const encryptedMeta = await window.crypto.subtle.encrypt(
+    { name: 'AES-GCM', iv }, // reuse same IV is generally safe if the key is unique
+    aesKey,
+    metaEncoder.encode(metaData)
+  );
+
+  // 6. Package everything into metadata string
+  const metadata = JSON.stringify({
+    r: b64Encode(new Uint8Array(encryptedKeyForRecipient)),
+    s: b64Encode(new Uint8Array(encryptedKeyForMe)),
+    iv: b64Encode(iv),
+    m: b64Encode(new Uint8Array(encryptedMeta)) // Encrypted Metadata
+  });
+
+  return {
+    encryptedBlob: new Blob([encryptedContent]),
+    encryptedMetadata: metadata
+  };
+};
+
+/**
+ * Decrypts a file (Blob) using metadata and private key
+ */
+export const decryptFile = async (
+  encryptedBlob: Blob,
+  metadataStr: string,
+  privateKey: CryptoKey,
+  isSender: boolean
+): Promise<{ decryptedBlob: Blob; fileName: string; fileSize: string }> => {
+  const metadata = JSON.parse(metadataStr);
+  const encryptedAesKeyB64 = isSender ? metadata.s : metadata.r;
+  const iv = b64Decode(metadata.iv);
+
+  // 1. Decrypt the AES key with RSA
+  const decryptedAesKeyRaw = await window.crypto.subtle.decrypt(
+    { name: 'RSA-OAEP' },
+    privateKey,
+    b64Decode(encryptedAesKeyB64) as any
+  ) as ArrayBuffer;
+
+  // 2. Import the AES key
+  const aesKey = await window.crypto.subtle.importKey(
+    'raw',
+    decryptedAesKeyRaw,
+    { name: 'AES-GCM' },
+    false,
+    ['decrypt']
+  );
+
+  // 3. Decrypt the file content
+  const encryptedContent = await encryptedBlob.arrayBuffer();
+  const decryptedContent = await window.crypto.subtle.decrypt(
+    { name: 'AES-GCM', iv: iv as BufferSource },
+    aesKey,
+    encryptedContent
+  );
+
+  // 4. Decrypt metadata
+  let fileName = "File";
+  let fileSize = "Unknown";
+  if (metadata.m) {
+    try {
+      const decryptedMetaBuffer = await window.crypto.subtle.decrypt(
+        { name: 'AES-GCM', iv: iv as any },
+        aesKey,
+        b64Decode(metadata.m) as any
+      );
+      const meta = JSON.parse(new TextDecoder().decode(decryptedMetaBuffer as any));
+      fileName = meta.name;
+      fileSize = meta.size;
+    } catch (e) {
+      console.error("Metadata decryption failed:", e);
+    }
+  }
+
+  return {
+    decryptedBlob: new Blob([decryptedContent]),
+    fileName,
+    fileSize
+  };
 };

@@ -71,8 +71,8 @@ model Message {
   chatRoomId     Int
   message        String?     @db.Text
   fileUrl        String?     @db.Text
-  fileName       String?
-  fileSize       String?
+  fileName       String?     @db.Text
+  fileSize       String?     @db.Text
   messageType    MessageType @default(TEXT)
   status         MessageStatus @default(UNSEEN)
   isEncrypted    Boolean     @default(false)

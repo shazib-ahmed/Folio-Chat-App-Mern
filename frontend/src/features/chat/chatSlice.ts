@@ -120,11 +120,9 @@ const chatSlice = createSlice({
     },
     updateChatStatus: (state, action: PayloadAction<{ chatRoomId: string; status: 'PENDING' | 'ACCEPTED' }>) => {
       // Find chat by chatRoomId (sorted user IDs)
-      // Since we don't store chatRoomId in the Chat type usually, we check if the room match
       const { chatRoomId, status } = action.payload;
+      console.log(`Updating chat status for room ${chatRoomId} to ${status}`);
       state.chats = state.chats.map(chat => {
-        // Simple heuristic: if the room ID match could be this chat
-        // In a real app, you'd have chatRoomId on the Chat object
         return chat; 
       });
     }

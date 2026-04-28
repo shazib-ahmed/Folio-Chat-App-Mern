@@ -24,13 +24,36 @@ export function ChatListItem({ chat, isActive, onClick }: ChatListItemProps) {
         const privateKey = await getLocalPrivateKey();
         if (privateKey) {
           try {
+            let cipherText = chat.lastMessage;
+            
+            // Check if it's already a placeholder (like "📷 Photo" or "[Image]")
+            if (cipherText.includes('📷') || cipherText.includes('🎥') || cipherText.includes('🎵') || cipherText.includes('📄')) {
+              setDisplayText(cipherText);
+              return;
+            }
+
+            // Check if it's JSON
+            try {
+              const parsed = JSON.parse(cipherText);
+              if (parsed.fileMeta || (parsed.iv && (parsed.r || parsed.s))) {
+                const typeLabels: any = { 'IMAGE': '📷 Photo', 'VIDEO': '🎥 Video', 'AUDIO': '🎵 Audio', 'FILE': '📄 File' };
+                const label = typeLabels[chat.lastMessageType || ''] || '📄 Attachment'; 
+                setDisplayText((String(chat.lastMessageSenderId) === String(me?.id) ? "You: " : "") + label);
+                return;
+              } else if (parsed.text) {
+                cipherText = parsed.text;
+              }
+            } catch (e) {
+              // Not JSON, continue as standard encrypted text
+            }
+
             const isSender = String(chat.lastMessageSenderId) === String(me?.id);
-            const decrypted = await decryptMessage(chat.lastMessage, privateKey, isSender);
+            const decrypted = await decryptMessage(cipherText, privateKey, isSender);
             setDisplayText((isSender ? "You: " : "") + decrypted);
           } catch (err) {
-            console.log('Sidebar raw message:', chat.lastMessage);
             console.error('Sidebar decryption failed:', err);
-            setDisplayText(chat.lastMessageSenderId === String(me?.id) ? "You: [Encrypted]" : "[Encrypted]");
+            // If it fails, it's likely already a display string or a corrupted cipher
+            setDisplayText(chat.lastMessage);
           }
         }
       } else {
@@ -38,7 +61,7 @@ export function ChatListItem({ chat, isActive, onClick }: ChatListItemProps) {
       }
     };
     handleDecryption();
-  }, [chat.lastMessage, chat.isEncrypted, chat.lastMessageSenderId, me?.id]);
+  }, [chat.lastMessage, chat.isEncrypted, chat.lastMessageSenderId, chat.lastMessageType, me?.id]);
 
   return (
     <div

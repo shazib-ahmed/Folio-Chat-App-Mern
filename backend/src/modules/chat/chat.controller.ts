@@ -33,15 +33,33 @@ export class ChatController {
   }))
   async sendMessage(
     @Req() req: express.Request,
-    @Body('receiverId') receiverId: string,
-    @Body('message') message: string,
-    @Body('type') type: MessageType,
-    @Body('isEncrypted') isEncrypted?: string,
-    @Body('clientMsgId') clientMsgId?: string,
+    @Body() body: any,
     @UploadedFile() file?: Express.Multer.File,
   ) {
+    const { receiverId, message, type, isEncrypted, clientMsgId, fileUrl, fileName, fileSize } = body;
+    console.log('DEBUG: sendMessage body:', { receiverId, type, isEncrypted, fileUrl: !!fileUrl, fileName: !!fileName });
+    
     const user = req.user as any;
-    return this.chatService.sendMessage(user.userId, Number(receiverId), message, type, file, String(isEncrypted) === 'true', clientMsgId);
+    return this.chatService.sendMessage(
+      user.userId, 
+      Number(receiverId), 
+      message, 
+      type, 
+      file, 
+      String(isEncrypted) === 'true' || isEncrypted === true, 
+      clientMsgId,
+      fileUrl,
+      fileName,
+      fileSize
+    );
+  }
+
+  @Post('upload')
+  @UseInterceptors(FileInterceptor('file', {
+    limits: { fileSize: 100 * 1024 * 1024 } // 100MB
+  }))
+  async uploadFile(@UploadedFile() file: Express.Multer.File) {
+    return this.chatService.uploadFile(file);
   }
 
   @Get('messages/:username')

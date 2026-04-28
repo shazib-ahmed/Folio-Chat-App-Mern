@@ -16,16 +16,37 @@ export const getUserByUsernameApi = async (username: string): Promise<any> => {
   return response.data;
 };
 
-export const sendMessageApi = async (receiverId: string, message: string, type: string, file?: File, isEncrypted: boolean = false, clientMsgId?: string) => {
+export const uploadFileApi = async (file: File) => {
+  const formData = new FormData();
+  formData.append('file', file);
+  const response = await api.post('/chat/upload', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' }
+  });
+  return response.data;
+};
+
+export const sendMessageApi = async (
+  receiverId: string, 
+  content: string, 
+  type: 'TEXT' | 'IMAGE' | 'VIDEO' | 'AUDIO' | 'FILE', 
+  file?: File, 
+  isEncrypted: boolean = false, 
+  clientMsgId?: string,
+  fileUrl?: string,
+  fileName?: string,
+  fileSize?: string
+) => {
   const formData = new FormData();
   formData.append('receiverId', receiverId);
-  formData.append('message', message);
+  formData.append('message', content);
   formData.append('type', type);
-  formData.append('isEncrypted', isEncrypted.toString());
+  if (file) formData.append('file', file);
+  formData.append('isEncrypted', String(isEncrypted));
   if (clientMsgId) formData.append('clientMsgId', clientMsgId);
-  if (file) {
-    formData.append('file', file);
-  }
+  if (fileUrl) formData.append('fileUrl', fileUrl);
+  if (fileName) formData.append('fileName', fileName);
+  if (fileSize) formData.append('fileSize', fileSize);
+  
   const response = await api.post('/chat/send', formData, {
     headers: { 'Content-Type': 'multipart/form-data' }
   });
