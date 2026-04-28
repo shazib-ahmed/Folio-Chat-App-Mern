@@ -1,0 +1,102 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            Int       @id @default(autoincrement())
+  name          String?
+  username      String    @unique
+  email         String    @unique
+  phone         String?   @unique
+  password      String
+  country       String?
+  avatar        String?
+  isOnline      Boolean   @default(false)
+  lastSeen      DateTime  @default(now())
+  
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  deletedAt     DateTime?
+
+  otps             Otp[]
+  sentMessages     Message[] @relation("SentMessages")
+  receivedMessages Message[] @relation("ReceivedMessages")
+  blockedUsers     Block[]   @relation("Blocker")
+  blockedBy        Block[]   @relation("Blocked")
+}
+
+model Otp {
+  id        Int       @id @default(autoincrement())
+  otp       String
+  userId    Int
+  user      User      @relation(fields: [userId], references: [id])
+  
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+}
+
+model ChatRoom {
+  id         Int       @id @default(autoincrement())
+  chatRoomId String    @unique // Unique identifier for the room
+  
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  deletedAt  DateTime?
+
+  messages   Message[]
+}
+
+model Message {
+  id             Int         @id @default(autoincrement())
+  senderId       Int
+  receiverId     Int
+  chatRoomId     Int
+  message        String?     @db.Text
+  messageType    MessageType @default(TEXT)
+  status         MessageStatus @default(UNSEEN)
+  
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+  deletedAt      DateTime?
+
+  sender         User        @relation("SentMessages", fields: [senderId], references: [id])
+  receiver       User        @relation("ReceivedMessages", fields: [receiverId], references: [id])
+  chatRoom       ChatRoom    @relation(fields: [chatRoomId], references: [id])
+}
+
+model Block {
+  id          Int       @id @default(autoincrement())
+  blockerId   Int
+  blockedId   Int
+  
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  blocker     User      @relation("Blocker", fields: [blockerId], references: [id])
+  blocked     User      @relation("Blocked", fields: [blockedId], references: [id])
+
+  @@unique([blockerId, blockedId])
+}
+
+enum MessageType {
+  TEXT
+  IMAGE
+  FILE
+  AUDIO
+  VIDEO
+}
+
+enum MessageStatus {
+  SEEN
+  UNSEEN
+}
