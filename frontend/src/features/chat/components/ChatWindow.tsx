@@ -4,7 +4,7 @@ import { ScrollArea } from "@/shared/ui/scroll-area";
 import { Input } from "@/shared/ui/input";
 import { Button } from "@/shared/ui/button";
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faEllipsisVertical, faSearch, faFaceSmile, faPaperclip, faMicrophone, faPaperPlane, faImage, faFile, faCamera, faUser, faArrowLeft } from '@fortawesome/free-solid-svg-icons';
+import { faEllipsisVertical, faSearch, faFaceSmile, faPaperclip, faMicrophone, faPaperPlane, faImage, faFile, faCamera, faUser, faArrowLeft, faPhone, faVideo } from '@fortawesome/free-solid-svg-icons';
 import { MessageBubble } from "./MessageBubble";
 import { Chat, Message } from "../types";
 import { useNavigate } from "react-router-dom";
@@ -18,9 +18,11 @@ import {
 interface ChatWindowProps {
   chat?: Chat;
   messages: Message[];
+  onStartAudioCall?: (chat: Chat) => void;
+  onStartVideoCall?: (chat: Chat) => void;
 }
 
-export function ChatWindow({ chat, messages }: ChatWindowProps) {
+export function ChatWindow({ chat, messages, onStartAudioCall, onStartVideoCall }: ChatWindowProps) {
   const [inputText, setInputText] = useState("");
   const navigate = useNavigate();
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -87,7 +89,17 @@ export function ChatWindow({ chat, messages }: ChatWindowProps) {
             </p>
           </div>
         </div>
-        <div className="flex gap-4 text-muted-foreground">
+        <div className="flex gap-5 text-muted-foreground items-center">
+          <FontAwesomeIcon 
+            icon={faVideo} 
+            className="h-4 w-4 cursor-pointer hover:text-foreground" 
+            onClick={() => chat && onStartVideoCall?.(chat)}
+          />
+          <FontAwesomeIcon 
+            icon={faPhone} 
+            className="h-4 w-4 cursor-pointer hover:text-foreground" 
+            onClick={() => chat && onStartAudioCall?.(chat)}
+          />
           <FontAwesomeIcon icon={faSearch} className="h-4 w-4 cursor-pointer hover:text-foreground" />
           <FontAwesomeIcon icon={faEllipsisVertical} className="h-4 w-4 cursor-pointer hover:text-foreground" />
         </div>

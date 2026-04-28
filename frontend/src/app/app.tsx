@@ -2,6 +2,8 @@ import React from 'react';
 import { BrowserRouter as Router, Routes, Route, useParams, Navigate, useLocation } from 'react-router-dom';
 import { ChatSidebar } from '@/features/chat/components/ChatSidebar';
 import { ChatWindow } from '@/features/chat/components/ChatWindow';
+import { AudioCallWindow } from '@/features/chat/components/AudioCallWindow';
+import { VideoCallWindow } from '@/features/chat/components/VideoCallWindow';
 import { AuthPage } from '@/features/auth/pages/AuthPage';
 import { ProfileSettings } from '@/features/settings/components/ProfileSettings';
 import { CredentialsSettings } from '@/features/settings/components/CredentialsSettings';
@@ -85,6 +87,9 @@ const MOCK_MESSAGES: Message[] = [
 function ChatLayout() {
   const { chatId } = useParams<{ chatId: string }>();
   const { pathname } = useLocation();
+  const [activeAudioCall, setActiveAudioCall] = React.useState<Chat | null>(null);
+  const [activeVideoCall, setActiveVideoCall] = React.useState<Chat | null>(null);
+  
   const activeChat = MOCK_CHATS.find(c => c.id === chatId);
   
   const isSettingsRoute = ['/profile', '/credentials', '/settings'].includes(pathname);
@@ -144,9 +149,26 @@ function ChatLayout() {
           <ChatWindow 
             chat={activeChat} 
             messages={messages} 
+            onStartAudioCall={(chat) => setActiveAudioCall(chat)}
+            onStartVideoCall={(chat) => setActiveVideoCall(chat)}
           />
         )}
       </div>
+
+      {activeAudioCall && (
+        <AudioCallWindow 
+          chat={activeAudioCall} 
+          isMinimized={activeChat?.id !== activeAudioCall.id}
+          onClose={() => setActiveAudioCall(null)} 
+        />
+      )}
+      {activeVideoCall && (
+        <VideoCallWindow 
+          chat={activeVideoCall} 
+          isMinimized={activeChat?.id !== activeVideoCall.id}
+          onClose={() => setActiveVideoCall(null)} 
+        />
+      )}
     </div>
   );
 }
