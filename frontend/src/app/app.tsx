@@ -228,7 +228,15 @@ function App() {
           path="/login" 
           element={
             <PublicRoute>
-              <AuthPage />
+              <AuthPage initialIsLogin={true} />
+            </PublicRoute>
+          } 
+        />
+        <Route 
+          path="/signup" 
+          element={
+            <PublicRoute>
+              <AuthPage initialIsLogin={false} />
             </PublicRoute>
           } 
         />

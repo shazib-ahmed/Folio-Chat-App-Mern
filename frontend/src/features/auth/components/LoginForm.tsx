@@ -11,11 +11,7 @@ import { setCredentials } from '../authSlice';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faSpinner, faEye, faEyeSlash } from '@fortawesome/free-solid-svg-icons';
 
-interface LoginFormProps {
-  onSwitchToSignup: () => void;
-}
-
-export function LoginForm({ onSwitchToSignup }: LoginFormProps) {
+export function LoginForm() {
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -119,7 +115,7 @@ export function LoginForm({ onSwitchToSignup }: LoginFormProps) {
             Don't have an account?{" "}
             <button 
               type="button"
-              onClick={onSwitchToSignup}
+              onClick={() => navigate('/signup')}
               className="text-primary hover:underline font-medium"
             >
               Sign up

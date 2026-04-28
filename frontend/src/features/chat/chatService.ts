@@ -25,12 +25,22 @@ export const sendMessageApi = async (formData: FormData): Promise<any> => {
   return response.data;
 };
 
-export const getMessagesApi = async (username: string): Promise<any[]> => {
+export const getMessagesApi = async (username: string): Promise<any> => {
   const response = await api.get(`/chat/messages/${username}`);
   return response.data;
 };
 
 export const markSeenApi = async (chatId: string): Promise<any> => {
   const response = await api.post(`/chat/mark-seen/${chatId}`);
+  return response.data;
+};
+
+export const blockUserApi = async (userId: string): Promise<any> => {
+  const response = await api.post(`/chat/block/${userId}`);
+  return response.data;
+};
+
+export const unblockUserApi = async (userId: string): Promise<any> => {
+  const response = await api.post(`/chat/unblock/${userId}`);
   return response.data;
 };

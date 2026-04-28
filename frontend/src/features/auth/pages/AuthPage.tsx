@@ -1,12 +1,18 @@
 import React, { useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import { LoginForm } from '../components/LoginForm';
 import { SignupForm } from '../components/SignupForm';
 import { usePageTitle } from '@/shared/hooks/usePageTitle';
 
 import { ThemeSwitcher } from '@/shared/components/ThemeSwitcher';
 
-export function AuthPage() {
-  const [isLogin, setIsLogin] = useState(true);
+export function AuthPage({ initialIsLogin = true }: { initialIsLogin?: boolean }) {
+  const { pathname } = useLocation();
+  const [isLogin, setIsLogin] = useState(pathname === '/login');
+
+  React.useEffect(() => {
+    setIsLogin(pathname === '/login');
+  }, [pathname]);
 
   usePageTitle(isLogin ? "Login | Folio Chat" : "Sign Up | Folio Chat");
 
@@ -24,9 +30,9 @@ export function AuthPage() {
 
         <div className="transform transition-all duration-500 ease-in-out">
           {isLogin ? (
-            <LoginForm onSwitchToSignup={() => setIsLogin(false)} />
+            <LoginForm />
           ) : (
-            <SignupForm onSwitchToLogin={() => setIsLogin(true)} />
+            <SignupForm />
           )}
         </div>
 

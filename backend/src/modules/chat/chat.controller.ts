@@ -53,4 +53,16 @@ export class ChatController {
     const user = req.user as any;
     return this.chatService.markAsSeen(user.userId, Number(chatId));
   }
+
+  @Post('block/:userId')
+  async blockUser(@Req() req: express.Request, @Param('userId') userId: string) {
+    const user = req.user as any;
+    return this.chatService.blockUser(user.userId, Number(userId));
+  }
+
+  @Post('unblock/:userId')
+  async unblockUser(@Req() req: express.Request, @Param('userId') userId: string) {
+    const user = req.user as any;
+    return this.chatService.unblockUser(user.userId, Number(userId));
+  }
 }

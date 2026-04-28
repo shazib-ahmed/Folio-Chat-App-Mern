@@ -26,6 +26,10 @@ const setupGlobalListeners = () => {
 	socket.on('stopTyping', (data: any) => {
 		subscribers.forEach(cb => cb(null, { ...data, type: 'stopTyping' }));
 	});
+
+	socket.on('userBlockStatus', (data: any) => {
+		subscribers.forEach(cb => cb(null, { ...data, type: 'userBlockStatus' }));
+	});
 };
 
 export const initiateSocketConnection = (userId: string | number) => {

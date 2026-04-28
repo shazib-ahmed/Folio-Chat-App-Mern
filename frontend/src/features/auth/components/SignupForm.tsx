@@ -11,12 +11,7 @@ import { setCredentials } from '../authSlice';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faSpinner, faEye, faEyeSlash } from '@fortawesome/free-solid-svg-icons';
 
-interface SignupFormProps {
-  onSwitchToLogin: () => void;
-}
-
-
-export function SignupForm({ onSwitchToLogin }: SignupFormProps) {
+export function SignupForm() {
   const [formData, setFormData] = useState({
     name: '',
     username: '',
@@ -50,6 +45,7 @@ export function SignupForm({ onSwitchToLogin }: SignupFormProps) {
     const newErrors: Record<string, string> = {};
     if (!formData.username) newErrors.username = 'Username is required';
     if (!formData.email) newErrors.email = 'Email is required';
+    if (!formData.phone) newErrors.phone = 'Phone number is required';
     if (!formData.password) newErrors.password = 'Password is required';
     if (formData.password && formData.password.length < 6) newErrors.password = 'Password must be at least 6 characters';
     if (formData.password !== formData.confirmPassword) newErrors.confirmPassword = 'Passwords do not match';
@@ -230,7 +226,7 @@ export function SignupForm({ onSwitchToLogin }: SignupFormProps) {
             Already have an account?{" "}
             <button 
               type="button"
-              onClick={onSwitchToLogin}
+              onClick={() => navigate('/login')}
               className="text-primary hover:underline font-medium"
             >
               Log in

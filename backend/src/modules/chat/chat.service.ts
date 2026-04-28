@@ -58,10 +58,82 @@ export class ChatService {
       messageType: message.messageType,
     };
 
+    const isBlocked = await this.prisma.block.findFirst({
+      where: {
+        OR: [
+          { blockerId: senderId, blockedId: receiverId, deletedAt: null },
+          { blockerId: receiverId, blockedId: senderId, deletedAt: null }
+        ]
+      }
+    });
+
+    if (isBlocked) {
+      throw new Error('You cannot send messages to this user.');
+    }
+
     this.chatGateway.sendMessageToUser(receiverId, 'newMessage', socketPayload);
     this.chatGateway.sendMessageToUser(senderId, 'newMessage', socketPayload);
 
     return message;
+  }
+
+  async blockUser(blockerId: number, blockedId: number) {
+    const existing = await this.prisma.block.findUnique({
+      where: {
+        blockerId_blockedId: { blockerId, blockedId }
+      }
+    });
+
+    if (existing) {
+      await this.prisma.block.update({
+        where: { id: existing.id },
+        data: { deletedAt: null }
+      });
+    } else {
+      await this.prisma.block.create({
+        data: { blockerId, blockedId }
+      });
+    }
+    
+    // Notify the other user
+    this.chatGateway.sendMessageToUser(blockedId, 'userBlockStatus', {
+      blockerId,
+      isBlocked: true
+    });
+    
+    return { success: true };
+  }
+
+  async unblockUser(blockerId: number, blockedId: number) {
+    await this.prisma.block.updateMany({
+      where: { blockerId, blockedId },
+      data: { deletedAt: new Date() }
+    });
+
+    // Notify the other user
+    this.chatGateway.sendMessageToUser(blockedId, 'userBlockStatus', {
+      blockerId,
+      isBlocked: false
+    });
+
+    return { success: true };
+  }
+
+  async getBlockStatus(user1Id: number, user2Id: number) {
+    const block = await this.prisma.block.findFirst({
+      where: {
+        OR: [
+          { blockerId: user1Id, blockedId: user2Id, deletedAt: null },
+          { blockerId: user2Id, blockedId: user1Id, deletedAt: null }
+        ]
+      }
+    });
+
+    if (!block) return { isBlocked: false, blockedByMe: false };
+    return {
+      isBlocked: true,
+      blockedByMe: block.blockerId === user1Id
+    };
   }
 
   async getMessages(userId: number, otherUsername: string) {
@@ -83,17 +155,22 @@ export class ChatService {
       }
     });
 
-    return messages.map(msg => ({
-      id: msg.id.toString(),
-      senderId: msg.senderId.toString(),
-      text: msg.message,
-      fileUrl: msg.fileUrl,
-      fileName: msg.fileName,
-      fileSize: msg.fileSize,
-      timestamp: this.formatTime(msg.createdAt),
-      status: msg.status.toLowerCase(),
-      messageType: msg.messageType,
-    }));
+    const blockStatus = await this.getBlockStatus(userId, otherUser.id);
+
+    return {
+      messages: messages.map(msg => ({
+        id: msg.id.toString(),
+        senderId: msg.senderId.toString(),
+        text: msg.message,
+        fileUrl: msg.fileUrl,
+        fileName: msg.fileName,
+        fileSize: msg.fileSize,
+        timestamp: this.formatTime(msg.createdAt),
+        status: msg.status.toLowerCase(),
+        messageType: msg.messageType,
+      })),
+      ...blockStatus
+    };
   }
 
   private async getOrCreateChatRoom(user1Id: number, user2Id: number) {
@@ -172,6 +249,7 @@ export class ChatService {
             online: otherUser.isOnline,
             unreadCount: unreadCount,
             lastSeen: otherUser.lastSeen ? this.formatTime(otherUser.lastSeen) : null,
+            ...(await this.getBlockStatus(userId, otherUser.id))
           });
         }
       }
