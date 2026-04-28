@@ -10,7 +10,7 @@ interface MessageBubbleProps {
   isMe?: boolean;
 }
 
-function VoiceMessage({ url, isMe }: { url: string; isMe?: boolean }) {
+const VoiceMessage = React.memo(({ url, isMe }: { url: string; isMe?: boolean }) => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -89,9 +89,9 @@ function VoiceMessage({ url, isMe }: { url: string; isMe?: boolean }) {
       </div>
     </div>
   );
-}
+});
 
-export function MessageBubble({ message, isMe }: MessageBubbleProps) {
+export const MessageBubble = React.memo(({ message, isMe }: MessageBubbleProps) => {
   return (
     <div className={cn(
       "flex w-full mb-2",
@@ -184,4 +184,4 @@ export function MessageBubble({ message, isMe }: MessageBubbleProps) {
       </div>
     </div>
   );
-}
+});

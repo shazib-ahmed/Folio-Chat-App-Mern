@@ -43,9 +43,14 @@ export class ChatController {
   }
 
   @Get('messages/:username')
-  async getMessages(@Req() req: express.Request, @Param('username') username: string) {
+  async getMessages(
+    @Req() req: express.Request, 
+    @Param('username') username: string,
+    @Query('cursor') cursor?: string,
+    @Query('limit') limit?: string,
+  ) {
     const user = req.user as any;
-    return this.chatService.getMessages(user.userId, username);
+    return this.chatService.getMessages(user.userId, username, cursor, limit ? Number(limit) : 20);
   }
 
   @Post('mark-seen/:chatId')

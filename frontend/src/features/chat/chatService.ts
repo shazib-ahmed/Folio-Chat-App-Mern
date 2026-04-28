@@ -25,8 +25,10 @@ export const sendMessageApi = async (formData: FormData): Promise<any> => {
   return response.data;
 };
 
-export const getMessagesApi = async (username: string): Promise<any> => {
-  const response = await api.get(`/chat/messages/${username}`);
+export const getMessagesApi = async (username: string, cursor?: string, limit: number = 20): Promise<any> => {
+  const response = await api.get(`/chat/messages/${username}`, {
+    params: { cursor, limit }
+  });
   return response.data;
 };
 

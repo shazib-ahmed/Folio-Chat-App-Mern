@@ -82,6 +82,8 @@ model Message {
   sender         User        @relation("SentMessages", fields: [senderId], references: [id])
   receiver       User        @relation("ReceivedMessages", fields: [receiverId], references: [id])
   chatRoom       ChatRoom    @relation(fields: [chatRoomId], references: [id])
+
+  @@index([chatRoomId, id])
 }
 
 model Block {

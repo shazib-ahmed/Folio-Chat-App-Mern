@@ -177,29 +177,38 @@ export class ChatService {
     };
   }
 
-  async getMessages(userId: number, otherUsername: string) {
+  async getMessages(userId: number, otherUsername: string, cursor?: string, limit: number = 20) {
     const otherUser = await this.prisma.user.findUnique({
       where: { username: otherUsername }
     });
 
-    if (!otherUser) return [];
+    if (!otherUser) return { messages: [], hasMore: false };
 
     const chatRoom = await this.getOrCreateChatRoom(userId, otherUser.id);
 
     const messages = await this.prisma.message.findMany({
+      take: limit,
+      skip: cursor ? 1 : 0,
+      cursor: cursor ? { id: Number(cursor) } : undefined,
       where: {
         chatRoomId: chatRoom.id,
         deletedAt: null
       },
       orderBy: {
-        createdAt: 'asc'
+        id: 'desc'
       }
     });
+
+    // Determine if there are more messages
+    const nextCursor = messages.length === limit ? messages[messages.length - 1].id.toString() : null;
+
+    // Reverse to maintain chronological order for the frontend
+    const chronologicalMessages = [...messages].reverse();
 
     const blockStatus = await this.getBlockStatus(userId, otherUser.id);
 
     return {
-      messages: messages.map(msg => ({
+      messages: chronologicalMessages.map(msg => ({
         id: msg.id.toString(),
         senderId: msg.senderId.toString(),
         text: msg.message,
@@ -212,6 +221,8 @@ export class ChatService {
       })),
       chatStatus: chatRoom.status,
       requesterId: chatRoom.requesterId ? chatRoom.requesterId.toString() : null,
+      nextCursor,
+      hasMore: !!nextCursor,
       ...blockStatus
     };
   }

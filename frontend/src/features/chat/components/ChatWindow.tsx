@@ -7,7 +7,6 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faBan, faSearch, faFaceSmile, faPaperclip, faMicrophone, faPaperPlane, faArrowLeft, faPhone, faVideo, faXmark, faChevronDown, faTrash, faUnlock } from '@fortawesome/free-solid-svg-icons';
 import { MessageBubble } from "./MessageBubble";
 import { Chat, Message } from "../types";
-import { useNavigate } from "react-router-dom";
 import { cn } from "@/shared/lib/utils";
 
 import { getMessagesApi, sendMessageApi, markSeenApi, blockUserApi, unblockUserApi, acceptRequestApi } from '../chatService';
@@ -44,12 +43,14 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
   const [filePreview, setFilePreview] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
+  const [isFetchingMore, setIsFetchingMore] = useState(false);
   
-  const navigate = useNavigate();
   const dispatch = useDispatch<AppDispatch>();
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pickerRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
   const currentChatRef = useRef<Chat | undefined>(chat);
   const [isTyping, setIsTyping] = useState(false);
   const [showScrollButton, setShowScrollButton] = useState(false);
@@ -77,13 +78,15 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
   useEffect(() => {
     if (chat?.username) {
       setIsLoadingMessages(true);
+      setLocalMessages([]); // Clear messages immediately when switching chats
       (getMessagesApi(chat.username) as Promise<any>).then(data => {
-        // data is { messages, isBlocked, blockedByMe }
+        // data is { messages, isBlocked, blockedByMe, hasMore }
         setLocalMessages(data.messages || []);
         setIsBlocked(data.isBlocked);
         setBlockedByMe(data.blockedByMe);
         setChatStatus(data.chatStatus || 'ACCEPTED');
         setRequesterId(data.requesterId ? String(data.requesterId) : null);
+        setHasMore(data.hasMore);
         
         // Mark as seen when opening the chat
         markSeenApi(chat.id).then(() => {
@@ -395,10 +398,43 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
   };
 
 
-  const scrollToBottom = () => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollIntoView({ behavior: 'smooth', block: 'end' });
-      setShowScrollButton(false);
+  const scrollToBottom = (behavior: ScrollBehavior = 'smooth') => {
+    // Using requestAnimationFrame to ensure DOM is ready
+    requestAnimationFrame(() => {
+      if (scrollRef.current) {
+        scrollRef.current.scrollIntoView({ behavior, block: 'end' });
+        setShowScrollButton(false);
+      }
+    });
+  };
+
+  const loadMoreMessages = async () => {
+    if (!chat?.username || !hasMore || isFetchingMore || isLoadingMessages) return;
+    
+    setIsFetchingMore(true);
+    const oldestMessageId = localMessages[0]?.id;
+    const container = messagesContainerRef.current;
+    const previousScrollHeight = container?.scrollHeight || 0;
+
+    try {
+      const data = await getMessagesApi(chat.username, oldestMessageId);
+      if (data.messages && data.messages.length > 0) {
+        setLocalMessages(prev => [...data.messages, ...prev]);
+        setHasMore(data.hasMore);
+        
+        // Preserve scroll position after DOM update
+        requestAnimationFrame(() => {
+          if (container) {
+            container.scrollTop = container.scrollHeight - previousScrollHeight;
+          }
+        });
+      } else {
+        setHasMore(false);
+      }
+    } catch (err) {
+      console.error('Failed to fetch more messages:', err);
+    } finally {
+      setIsFetchingMore(false);
     }
   };
 
@@ -406,11 +442,39 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
     const target = e.currentTarget;
     const isAtBottom = target.scrollHeight - target.scrollTop <= target.clientHeight + 150;
     setShowScrollButton(!isAtBottom);
+
+    // Trigger load more when reaching the top
+    if (target.scrollTop <= 50 && hasMore && !isFetchingMore && !isLoadingMessages) {
+      loadMoreMessages();
+    }
   };
 
+  const prevMessagesLengthRef = useRef(0);
+  const lastChatIdRef = useRef<string | undefined>(undefined);
+
   useEffect(() => {
-    scrollToBottom();
-  }, [localMessages, chat?.id, isTyping]);
+    const container = messagesContainerRef.current;
+    if (!container) return;
+
+    // Reset length tracking when switching chats
+    if (chat?.id !== lastChatIdRef.current) {
+      prevMessagesLengthRef.current = 0;
+      lastChatIdRef.current = chat?.id;
+    }
+
+    const isInitialLoad = localMessages.length > 0 && prevMessagesLengthRef.current === 0;
+    const isNewMessage = localMessages.length > prevMessagesLengthRef.current && !isFetchingMore;
+    const isNearBottom = container.scrollHeight - container.scrollTop <= container.clientHeight + 600;
+
+    if (isInitialLoad) {
+      // Use a slight timeout for initial load to ensure skeleton is gone and content is rendered
+      setTimeout(() => scrollToBottom('auto'), 100);
+    } else if (isNewMessage && isNearBottom) {
+      scrollToBottom('smooth');
+    }
+    
+    prevMessagesLengthRef.current = localMessages.length;
+  }, [localMessages, chat?.id, isFetchingMore]);
 
   if (!chat) {
     return (
@@ -637,9 +701,18 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
           style={{ backgroundImage: `url('https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png')` }}
         />
         <div 
-          className="flex-1 overflow-y-auto px-4 py-4 scroll-smooth flex flex-col"
+          ref={messagesContainerRef}
+          className="flex-1 overflow-y-auto px-4 py-4 flex flex-col"
           onScroll={handleScroll}
         >
+          {isFetchingMore && (
+            <div className="flex justify-center py-2">
+              <div className="flex items-center gap-2 bg-background/50 backdrop-blur-sm px-3 py-1 rounded-full border text-[10px] text-muted-foreground animate-in fade-in zoom-in duration-300">
+                <div className="w-2 h-2 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
+                Loading older messages...
+              </div>
+            </div>
+          )}
           {isLoadingMessages ? (
             <ChatWindowSkeleton />
           ) : (
@@ -693,7 +766,7 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
           <Button
             variant="secondary"
             size="icon"
-            onClick={scrollToBottom}
+            onClick={() => scrollToBottom()}
             className="absolute bottom-6 right-8 h-11 w-11 rounded-full shadow-2xl border border-primary/20 bg-background/90 backdrop-blur-md text-primary animate-in zoom-in fade-in duration-300 z-50"
           >
             <FontAwesomeIcon icon={faChevronDown} className="h-5 w-5" />
