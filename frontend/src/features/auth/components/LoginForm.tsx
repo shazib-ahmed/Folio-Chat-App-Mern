@@ -9,7 +9,7 @@ import { cn } from "@/shared/lib/utils";
 import { loginApi } from '../authService';
 import { setCredentials } from '../authSlice';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faSpinner } from '@fortawesome/free-solid-svg-icons';
+import { faSpinner, faEye, faEyeSlash } from '@fortawesome/free-solid-svg-icons';
 
 interface LoginFormProps {
   onSwitchToSignup: () => void;
@@ -18,6 +18,7 @@ interface LoginFormProps {
 export function LoginForm({ onSwitchToSignup }: LoginFormProps) {
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [errors, setErrors] = useState<{ identifier?: string; password?: string }>({});
   const [authError, setAuthError] = useState<string | null>(null);
@@ -79,14 +80,23 @@ export function LoginForm({ onSwitchToSignup }: LoginFormProps) {
               <Label htmlFor="password">Password</Label>
               <Link to="#" className="text-xs text-primary hover:underline">Forgot password?</Link>
             </div>
-            <Input 
-              id="password" 
-              type="password" 
-              className={cn("bg-background/50", errors.password && "border-red-500/50 focus-visible:ring-red-500/50")} 
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              disabled={isLoading}
-            />
+            <div className="relative">
+              <Input 
+                id="password" 
+                type={showPassword ? "text" : "password"} 
+                className={cn("bg-background/50 pr-10", errors.password && "border-red-500/50 focus-visible:ring-red-500/50")} 
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                disabled={isLoading}
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <FontAwesomeIcon icon={showPassword ? faEyeSlash : faEye} className="h-4 w-4" />
+              </button>
+            </div>
             {errors.password && <p className="text-xs text-red-400 font-semibold mt-1">{errors.password}</p>}
           </div>
 

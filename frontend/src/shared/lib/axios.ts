@@ -2,7 +2,7 @@ import axios from 'axios';
 import { store } from '@/app/store';
 import { setCredentials, logout } from '@/features/auth/authSlice';
 
-const API_URL = (process.env.REACT_APP_API_URL || 'http://localhost:5000') + '/api';
+const API_URL = (process.env.API_URL || 'http://localhost:5000') + '/api';
 
 const api = axios.create({
   baseURL: API_URL,
@@ -16,7 +16,7 @@ api.interceptors.request.use(
   (config) => {
     const state = store.getState();
     const token = state.auth.token;
-    
+
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
@@ -42,7 +42,7 @@ api.interceptors.response.use(
       try {
         const state = store.getState();
         const refreshToken = state.auth.refreshToken;
-        
+
         if (!refreshToken) throw new Error('No refresh token');
 
         // Call refresh endpoint
@@ -53,10 +53,10 @@ api.interceptors.response.use(
         // but here we do it in the slice or interceptor. 
         // Our slice's setCredentials handles localStorage.)
         if (state.auth.user) {
-          store.dispatch(setCredentials({ 
-            user: state.auth.user, 
-            access_token, 
-            refresh_token 
+          store.dispatch(setCredentials({
+            user: state.auth.user,
+            access_token,
+            refresh_token
           }));
         }
 

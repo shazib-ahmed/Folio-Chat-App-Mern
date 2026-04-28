@@ -1,5 +1,5 @@
 import React from 'react';
-import { BrowserRouter as Router, Routes, Route, useParams, useLocation } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, useParams, useLocation, useNavigate } from 'react-router-dom';
 import { ChatSidebar } from '@/features/chat/components/ChatSidebar';
 import { ChatWindow } from '@/features/chat/components/ChatWindow';
 import { AudioCallWindow } from '@/features/chat/components/AudioCallWindow';
@@ -10,7 +10,11 @@ import { CredentialsSettings } from '@/features/settings/components/CredentialsS
 import { usePageTitle } from '@/shared/hooks/usePageTitle';
 import { Chat, Message } from '@/features/chat/types';
 import { cn } from '@/shared/lib/utils';
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { faArrowLeft, faGear } from '@fortawesome/free-solid-svg-icons';
 import { Card, CardContent, CardHeader, CardTitle } from '@/shared/ui/card';
+import { Button } from '@/shared/ui/button';
+import { ScrollArea } from '@/shared/ui/scroll-area';
 import { ProtectedRoute, PublicRoute } from '@/routes/ProtectedRoute';
 
 const MOCK_CHATS: Chat[] = [
@@ -88,12 +92,14 @@ const MOCK_MESSAGES: Message[] = [
 function ChatLayout() {
   const { chatId } = useParams<{ chatId: string }>();
   const { pathname } = useLocation();
+  const navigate = useNavigate();
   const [activeAudioCall, setActiveAudioCall] = React.useState<Chat | null>(null);
   const [activeVideoCall, setActiveVideoCall] = React.useState<Chat | null>(null);
   
   const activeChat = MOCK_CHATS.find(c => c.id === chatId);
   
   const isSettingsRoute = ['/profile', '/credentials', '/settings'].includes(pathname);
+  const isSubSettingsRoute = ['/profile', '/credentials'].includes(pathname);
 
   const getPageTitle = () => {
     if (activeChat) return `${activeChat.name} | Folio Chat`;
@@ -108,11 +114,17 @@ function ChatLayout() {
   // For demo purposes, we only show messages for Elon
   const messages = chatId === 'elon-musk' ? MOCK_MESSAGES : [];
 
+  const getHeaderTitle = () => {
+    if (pathname === '/profile') return "Profile";
+    if (pathname === '/credentials') return "Credentials";
+    return "Settings";
+  };
+
   return (
     <div className="h-screen w-screen flex overflow-hidden bg-background">
       <div className={cn(
         "h-full border-r bg-[hsl(var(--sidebar-bg))] transition-all duration-300",
-        (chatId || isSettingsRoute) ? "hidden lg:block lg:w-[400px]" : "w-full lg:w-[400px]"
+        (chatId || isSubSettingsRoute) ? "hidden lg:block lg:w-[400px]" : "w-full lg:w-[400px]"
       )}>
         <ChatSidebar 
           chats={MOCK_CHATS} 
@@ -121,30 +133,58 @@ function ChatLayout() {
       </div>
       <div className={cn(
         "flex-1 h-full transition-all duration-300",
-        (chatId || isSettingsRoute) ? "block w-full" : "hidden lg:block"
+        (chatId || isSubSettingsRoute) ? "block w-full" : "hidden lg:block"
       )}>
         {isSettingsRoute ? (
-           <div className="flex-1 h-full flex flex-col items-center justify-center p-8 bg-[hsl(var(--chat-bg))] relative overflow-hidden">
+           <div className="flex-1 h-full flex flex-col bg-[hsl(var(--chat-bg))] relative overflow-hidden">
+              {/* Mobile/Tablet Header */}
+              <div className="h-[60px] bg-[hsl(var(--chat-header-bg))] px-4 flex items-center gap-3 shrink-0 border-b lg:hidden relative z-20">
+                <Button 
+                  variant="ghost" 
+                  size="icon" 
+                  className="text-muted-foreground hover:text-foreground -ml-2"
+                  onClick={() => {
+                    if (isSubSettingsRoute) {
+                      navigate('/settings');
+                    } else {
+                      navigate('/');
+                    }
+                  }}
+                >
+                  <FontAwesomeIcon icon={faArrowLeft} className="h-5 w-5" />
+                </Button>
+                <h4 className="text-sm font-semibold capitalize">{getHeaderTitle()}</h4>
+              </div>
+
               <div 
                 className="absolute inset-0 opacity-[0.03] pointer-events-none bg-repeat"
                 style={{ backgroundImage: `url('https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png')` }}
               />
-              <Card className="w-full max-w-2xl border-border/40 shadow-xl bg-card/50 backdrop-blur-sm relative z-10">
-                <CardHeader>
-                  <CardTitle className="text-2xl capitalize">{pathname.replace('/', '')}</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  {pathname === '/profile' && <ProfileSettings />}
-                  {pathname === '/credentials' && <CredentialsSettings />}
-                  {pathname === '/settings' && (
-                    <div className="py-12 text-center space-y-4">
-                      <div className="text-4xl">🚀</div>
-                      <h3 className="text-xl font-semibold">Coming Soon</h3>
-                      <p className="text-muted-foreground max-w-xs mx-auto text-sm">We are working hard to bring you more advanced customization options. Stay tuned!</p>
+              <ScrollArea className="flex-1 h-full w-full">
+                <div className="flex flex-col items-center p-4 md:p-8 min-h-full">
+                  {isSubSettingsRoute ? (
+                    <Card className="w-full max-w-2xl border-border/40 shadow-xl bg-card/50 backdrop-blur-sm relative z-10 my-auto">
+                      <CardHeader className="hidden lg:block">
+                        <CardTitle className="text-2xl capitalize">{getHeaderTitle()}</CardTitle>
+                      </CardHeader>
+                      <CardContent className="pt-6 lg:pt-0">
+                        {pathname === '/profile' && <ProfileSettings />}
+                        {pathname === '/credentials' && <CredentialsSettings />}
+                      </CardContent>
+                    </Card>
+                  ) : (
+                    <div className="flex-1 flex flex-col items-center justify-center py-20 text-center space-y-6 relative z-10">
+                      <div className="bg-primary/10 h-32 w-32 rounded-full flex items-center justify-center text-primary">
+                        <FontAwesomeIcon icon={faGear} className="h-16 w-16" />
+                      </div>
+                      <div className="space-y-2">
+                        <h2 className="text-3xl font-light text-foreground">Settings</h2>
+                        <p className="text-muted-foreground max-w-xs mx-auto">Select an option from the menu to manage your account and preferences.</p>
+                      </div>
                     </div>
                   )}
-                </CardContent>
-              </Card>
+                </div>
+              </ScrollArea>
            </div>
         ) : (
           <ChatWindow 

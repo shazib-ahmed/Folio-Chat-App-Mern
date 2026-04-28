@@ -1,5 +1,5 @@
 import React from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { cn } from '@/shared/lib/utils';
 import { ScrollArea } from "@/shared/ui/scroll-area";
 import { useDispatch, useSelector } from 'react-redux';
@@ -22,9 +22,20 @@ interface ChatSidebarProps {
 
 export function ChatSidebar({ chats, activeChatId }: ChatSidebarProps) {
   const navigate = useNavigate();
+  const location = useLocation();
   const dispatch = useDispatch();
   const { user } = useSelector((state: RootState) => state.auth);
-  const [view, setView] = React.useState<'chats' | 'settings'>('chats');
+  
+  const isSettingsPath = ['/profile', '/credentials', '/settings'].includes(location.pathname);
+  const [view, setView] = React.useState<'chats' | 'settings'>(isSettingsPath ? 'settings' : 'chats');
+
+  React.useEffect(() => {
+    if (isSettingsPath) {
+      setView('settings');
+    } else {
+      setView('chats');
+    }
+  }, [location.pathname, isSettingsPath]);
 
   const handleChatSelect = (id: string) => {
     navigate(`/messages/${id}`);
@@ -44,7 +55,6 @@ export function ChatSidebar({ chats, activeChatId }: ChatSidebarProps) {
   const settingsOptions = [
     { id: 'profile', name: 'Profile', icon: faUser, path: '/profile' },
     { id: 'credentials', name: 'Credentials', icon: faShieldHalved, path: '/credentials' },
-    { id: 'settings', name: 'Settings', icon: faGear, path: '/settings' },
   ];
 
   return (
@@ -67,6 +77,7 @@ export function ChatSidebar({ chats, activeChatId }: ChatSidebarProps) {
                 navigate('/');
               } else {
                 setView('settings');
+                navigate('/settings');
               }
             }}
           >
@@ -112,18 +123,27 @@ export function ChatSidebar({ chats, activeChatId }: ChatSidebarProps) {
         ) : (
           <div className="flex flex-col p-2 space-y-1">
             <h3 className="px-3 py-2 text-lg font-semibold mb-2">Settings</h3>
-            {settingsOptions.map(option => (
-              <button
-                key={option.id}
-                onClick={() => navigate(option.path)}
-                className="flex items-center gap-4 px-4 py-3 rounded-lg hover:bg-accent transition-colors text-left group"
-              >
-                <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary group-hover:bg-primary group-hover:text-primary-foreground transition-all">
-                  <FontAwesomeIcon icon={option.icon} />
-                </div>
-                <span className="font-medium">{option.name}</span>
-              </button>
-            ))}
+            {settingsOptions.map(option => {
+              const isActive = location.pathname === option.path;
+              return (
+                <button
+                  key={option.id}
+                  onClick={() => navigate(option.path)}
+                  className={cn(
+                    "flex items-center gap-4 px-4 py-3 rounded-lg transition-colors text-left group",
+                    isActive ? "bg-primary/10 text-primary" : "hover:bg-accent"
+                  )}
+                >
+                  <div className={cn(
+                    "w-10 h-10 rounded-full flex items-center justify-center transition-all",
+                    isActive ? "bg-primary text-primary-foreground" : "bg-primary/10 text-primary group-hover:bg-primary group-hover:text-primary-foreground"
+                  )}>
+                    <FontAwesomeIcon icon={option.icon} />
+                  </div>
+                  <span className="font-medium">{option.name}</span>
+                </button>
+              );
+            })}
           </div>
         )}
       </ScrollArea>

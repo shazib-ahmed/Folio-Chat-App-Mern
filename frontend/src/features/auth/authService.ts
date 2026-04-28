@@ -20,3 +20,13 @@ export const refreshApi = async (refreshToken: string) => {
   const response = await api.post('/auth/refresh', { refreshToken });
   return response.data;
 };
+
+export const updateProfileApi = async (data: any) => {
+  const response = await api.patch('/auth/profile', data);
+  return response.data;
+};
+
+export const updatePasswordApi = async (data: any) => {
+  const response = await api.patch('/auth/credentials', data);
+  return response.data;
+};

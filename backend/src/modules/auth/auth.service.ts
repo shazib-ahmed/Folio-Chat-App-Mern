@@ -2,6 +2,8 @@ import { ConflictException, Injectable, UnauthorizedException } from '@nestjs/co
 import { PrismaService } from '../../database/prisma.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
+import { UpdateProfileDto } from './dto/update-profile.dto';
+import { UpdatePasswordDto } from './dto/update-password.dto';
 import * as bcrypt from 'bcrypt';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
@@ -151,5 +153,77 @@ export class AuthService {
       access_token: accessToken,
       refresh_token: refreshToken,
     };
+  }
+
+  async updateProfile(userId: number, dto: UpdateProfileDto) {
+    // Check if email already exists for another user
+    if (dto.email) {
+      const existingEmail = await this.prisma.user.findFirst({
+        where: { 
+          email: dto.email,
+          id: { not: userId }
+        },
+      });
+      if (existingEmail) {
+        throw new ConflictException('Email already exists');
+      }
+    }
+
+    // Check if username already exists for another user
+    if (dto.username) {
+      const existingUsername = await this.prisma.user.findFirst({
+        where: { 
+          username: dto.username,
+          id: { not: userId }
+        },
+      });
+      if (existingUsername) {
+        throw new ConflictException('Username already taken');
+      }
+    }
+
+    // Check if phone already exists for another user
+    if (dto.phone) {
+      const existingPhone = await this.prisma.user.findFirst({
+        where: { 
+          phone: dto.phone,
+          id: { not: userId }
+        },
+      });
+      if (existingPhone) {
+        throw new ConflictException('Phone number already exists');
+      }
+    }
+
+    const updatedUser = await this.prisma.user.update({
+      where: { id: userId },
+      data: dto,
+    });
+
+    const { password, refreshToken, ...userWithoutPassword } = updatedUser;
+    return userWithoutPassword;
+  }
+
+  async updatePassword(userId: number, dto: UpdatePasswordDto) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+    });
+
+    if (!user) {
+      throw new UnauthorizedException('User not found');
+    }
+
+    const isPasswordValid = await bcrypt.compare(dto.oldPassword, user.password);
+    if (!isPasswordValid) {
+      throw new UnauthorizedException('Invalid old password');
+    }
+
+    const hashedPassword = await bcrypt.hash(dto.newPassword, 10);
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { password: hashedPassword },
+    });
+
+    return { message: 'Password updated successfully' };
   }
 }

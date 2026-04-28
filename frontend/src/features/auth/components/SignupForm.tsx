@@ -9,7 +9,7 @@ import { useDispatch } from 'react-redux';
 import { registerApi } from '../authService';
 import { setCredentials } from '../authSlice';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faSpinner } from '@fortawesome/free-solid-svg-icons';
+import { faSpinner, faEye, faEyeSlash } from '@fortawesome/free-solid-svg-icons';
 
 interface SignupFormProps {
   onSwitchToLogin: () => void;
@@ -22,9 +22,12 @@ export function SignupForm({ onSwitchToLogin }: SignupFormProps) {
     username: '',
     email: '',
     phone: '',
+    country: '',
     password: '',
     confirmPassword: '',
   });
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [authError, setAuthError] = useState<string | null>(null);
@@ -137,42 +140,73 @@ export function SignupForm({ onSwitchToLogin }: SignupFormProps) {
             />
             {errors.email && <p className="text-xs text-red-400 font-semibold mt-1">{errors.email}</p>}
           </div>
-          <div className="space-y-1">
-            <Label htmlFor="phone">Phone Number</Label>
-            <Input 
-              id="phone" 
-              type="tel" 
-              placeholder="+1234567890" 
-              className={cn("bg-background/50 h-9", errors.phone && "border-red-500/50 focus-visible:ring-red-500/50")} 
-              value={formData.phone}
-              onChange={handleChange}
-              disabled={isLoading}
-            />
-            {errors.phone && <p className="text-xs text-red-400 font-semibold mt-1">{errors.phone}</p>}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <Label htmlFor="phone">Phone Number</Label>
+              <Input 
+                id="phone" 
+                type="tel" 
+                placeholder="+1234567890" 
+                className={cn("bg-background/50 h-9", errors.phone && "border-red-500/50 focus-visible:ring-red-500/50")} 
+                value={formData.phone}
+                onChange={handleChange}
+                disabled={isLoading}
+              />
+              {errors.phone && <p className="text-xs text-red-400 font-semibold mt-1">{errors.phone}</p>}
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="country">Country</Label>
+              <Input 
+                id="country" 
+                placeholder="Bangladesh" 
+                className="bg-background/50 h-9" 
+                value={formData.country}
+                onChange={handleChange}
+                disabled={isLoading}
+              />
+            </div>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">
               <Label htmlFor="password">Password</Label>
-              <Input 
-                id="password" 
-                type="password" 
-                className={cn("bg-background/50 h-9", errors.password && "border-red-500/50 focus-visible:ring-red-500/50")} 
-                value={formData.password}
-                onChange={handleChange}
-                disabled={isLoading}
-              />
+              <div className="relative">
+                <Input 
+                  id="password" 
+                  type={showPassword ? "text" : "password"} 
+                  className={cn("bg-background/50 h-9 pr-9", errors.password && "border-red-500/50 focus-visible:ring-red-500/50")} 
+                  value={formData.password}
+                  onChange={handleChange}
+                  disabled={isLoading}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  <FontAwesomeIcon icon={showPassword ? faEyeSlash : faEye} className="h-3.5 w-3.5" />
+                </button>
+              </div>
               {errors.password && <p className="text-xs text-red-400 font-semibold mt-1">{errors.password}</p>}
             </div>
             <div className="space-y-1">
               <Label htmlFor="confirmPassword">Confirm</Label>
-              <Input 
-                id="confirmPassword" 
-                type="password" 
-                className={cn("bg-background/50 h-9", errors.confirmPassword && "border-red-500/50 focus-visible:ring-red-500/50")} 
-                value={formData.confirmPassword}
-                onChange={handleChange}
-                disabled={isLoading}
-              />
+              <div className="relative">
+                <Input 
+                  id="confirmPassword" 
+                  type={showConfirmPassword ? "text" : "password"} 
+                  className={cn("bg-background/50 h-9 pr-9", errors.confirmPassword && "border-red-500/50 focus-visible:ring-red-500/50")} 
+                  value={formData.confirmPassword}
+                  onChange={handleChange}
+                  disabled={isLoading}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  <FontAwesomeIcon icon={showConfirmPassword ? faEyeSlash : faEye} className="h-3.5 w-3.5" />
+                </button>
+              </div>
               {errors.confirmPassword && <p className="text-xs text-red-400 font-semibold mt-1">{errors.confirmPassword}</p>}
             </div>
           </div>

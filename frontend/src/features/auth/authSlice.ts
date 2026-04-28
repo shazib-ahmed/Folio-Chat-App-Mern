@@ -86,9 +86,13 @@ export const authSlice = createSlice({
     setLoading: (state, action: PayloadAction<boolean>) => {
       state.loading = action.payload;
     },
+    updateUser: (state, action: PayloadAction<User>) => {
+      state.user = action.payload;
+      localStorage.setItem('u_data', encryptData(action.payload));
+    },
   },
 });
 
-export const { setCredentials, logout, setError, setLoading } = authSlice.actions;
+export const { setCredentials, logout, setError, setLoading, updateUser } = authSlice.actions;
 
 export default authSlice.reducer;
