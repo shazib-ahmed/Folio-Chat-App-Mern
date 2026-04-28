@@ -4,7 +4,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/shared/ui/avatar";
 import { Input } from "@/shared/ui/input";
 import { Button } from "@/shared/ui/button";
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faBan, faSearch, faFaceSmile, faPaperclip, faMicrophone, faPaperPlane, faArrowLeft, faPhone, faVideo, faXmark, faChevronDown } from '@fortawesome/free-solid-svg-icons';
+import { faBan, faSearch, faFaceSmile, faPaperclip, faMicrophone, faPaperPlane, faArrowLeft, faPhone, faVideo, faXmark, faChevronDown, faTrash } from '@fortawesome/free-solid-svg-icons';
 import { MessageBubble } from "./MessageBubble";
 import { Chat, Message } from "../types";
 import { useNavigate } from "react-router-dom";
@@ -53,6 +53,11 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
   const currentChatRef = useRef<Chat | undefined>(chat);
   const [isTyping, setIsTyping] = useState(false);
   const [showScrollButton, setShowScrollButton] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingTime, setRecordingTime] = useState(0);
+  const [mediaRecorder, setMediaRecorder] = useState<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const recordingTimerRef = useRef<NodeJS.Timeout | null>(null);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Update ref when chat changes
@@ -179,16 +184,20 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
     setFilePreview(null);
   };
 
-  const handleSendMessage = async (e?: React.FormEvent) => {
+  const handleSendMessage = async (e?: React.FormEvent, audioBlob?: Blob) => {
     if (e) e.preventDefault();
-    if (!inputText.trim() && !selectedFile) return;
+    if (!inputText.trim() && !selectedFile && !audioBlob) return;
     if (!chat || !me) return;
 
     const formData = new FormData();
     formData.append('receiverId', chat.id);
     formData.append('message', inputText);
     
-    if (selectedFile) {
+    if (audioBlob) {
+      formData.append('type', 'AUDIO');
+      formData.append('file', audioBlob, 'voice-note.webm');
+      setIsUploading(true);
+    } else if (selectedFile) {
       const type = selectedFile.type.split('/')[0].toUpperCase();
       const mappedType = ['IMAGE', 'VIDEO', 'AUDIO'].includes(type) ? type : 'FILE';
       formData.append('type', mappedType);
@@ -206,10 +215,10 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
         text: inputText,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         status: 'pending' as any,
-        messageType: selectedFile ? (['IMAGE', 'VIDEO', 'AUDIO'].includes(selectedFile.type.split('/')[0].toUpperCase()) ? selectedFile.type.split('/')[0].toUpperCase() as any : 'FILE') : 'TEXT',
-        fileUrl: filePreview || undefined,
-        fileName: selectedFile?.name,
-        fileSize: selectedFile ? `${(selectedFile.size / 1024 / 1024).toFixed(2)} MB` : undefined,
+        messageType: audioBlob ? 'AUDIO' : (selectedFile ? (['IMAGE', 'VIDEO', 'AUDIO'].includes(selectedFile.type.split('/')[0].toUpperCase()) ? selectedFile.type.split('/')[0].toUpperCase() as any : 'FILE') : 'TEXT'),
+        fileUrl: audioBlob ? URL.createObjectURL(audioBlob) : (filePreview || undefined),
+        fileName: audioBlob ? 'Voice Note' : selectedFile?.name,
+        fileSize: audioBlob ? `${(audioBlob.size / 1024).toFixed(1)} KB` : (selectedFile ? `${(selectedFile.size / 1024 / 1024).toFixed(2)} MB` : undefined),
       };
 
       setLocalMessages(prev => [...prev, optimisticMsg]);
@@ -226,6 +235,57 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
       setLocalMessages(prev => prev.filter(m => !m.id.toString().startsWith('temp-')));
     } finally {
       setIsUploading(false);
+    }
+  };
+
+  // Audio Recording Functions
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      audioChunksRef.current = [];
+
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) audioChunksRef.current.push(e.data);
+      };
+
+      recorder.onstop = () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        // We don't automatically send here, we send when handleSendMessage is called with the blob
+        // But in WhatsApp, stop usually means send
+        handleSendMessage(undefined, audioBlob);
+        stream.getTracks().forEach(track => track.stop());
+      };
+
+      recorder.start();
+      setMediaRecorder(recorder);
+      setIsRecording(true);
+      setRecordingTime(0);
+      recordingTimerRef.current = setInterval(() => {
+        setRecordingTime(prev => prev + 1);
+      }, 1000);
+    } catch (err) {
+      console.error('Failed to start recording:', err);
+      alert('Could not access microphone. Please check permissions.');
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+      mediaRecorder.stop();
+      setIsRecording(false);
+      if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+    }
+  };
+
+  const cancelRecording = () => {
+    if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+      mediaRecorder.onstop = null; // Prevent sending
+      mediaRecorder.stop();
+      mediaRecorder.stream.getTracks().forEach(track => track.stop());
+      setIsRecording(false);
+      if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+      audioChunksRef.current = [];
     }
   };
 
@@ -490,84 +550,109 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
         )}
 
         <div className="p-3 flex items-center gap-2">
-          <div className="flex items-center">
-            <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-primary transition-colors">
-              <FontAwesomeIcon icon={faPaperclip} className="h-5 w-5" onClick={() => handleFileClick('file')} />
-            </Button>
-            
-            <div className="relative">
-              <Button 
-                variant="ghost" 
-                size="icon" 
-                className={cn("text-muted-foreground hover:text-primary transition-colors", isEmojiPickerOpen && "text-primary")}
-                onClick={() => setIsEmojiPickerOpen(!isEmojiPickerOpen)}
-              >
-                <FontAwesomeIcon icon={faFaceSmile} className="h-5 w-5" />
-              </Button>
-              
-              {isEmojiPickerOpen && (
-                <div className="absolute bottom-full left-0 mb-4 z-50" ref={pickerRef}>
-                  <EmojiPicker 
-                    onEmojiClick={handleEmojiClick}
-                    theme={Theme.AUTO}
-                    width={320}
-                    height={400}
-                  />
+          {isRecording ? (
+            <div className="flex-1 flex items-center gap-4 bg-primary/10 p-2 px-4 rounded-full border border-primary/20 animate-in slide-in-from-right-4 duration-300">
+              <div className="flex items-center gap-3 flex-1">
+                <div className="w-3 h-3 bg-destructive rounded-full animate-pulse shadow-[0_0_10px_rgba(239,68,68,0.5)]"></div>
+                <span className="text-sm font-medium text-foreground min-w-[40px]">
+                  {Math.floor(recordingTime / 60)}:{(recordingTime % 60).toString().padStart(2, '0')}
+                </span>
+                <div className="flex-1 h-8 flex items-center justify-center overflow-hidden">
+                  <div className="flex gap-0.5 items-center h-full">
+                     {[...Array(20)].map((_, i) => (
+                       <div key={i} className="w-0.5 bg-primary/40 rounded-full" style={{ height: `${Math.random() * 80 + 20}%`, animation: `pulse 1s infinite ${i * 0.05}s` }}></div>
+                     ))}
+                  </div>
                 </div>
-              )}
+              </div>
+              <div className="flex items-center gap-2">
+                <Button variant="ghost" size="icon" onClick={cancelRecording} className="text-destructive hover:bg-destructive/10 rounded-full h-10 w-10">
+                  <FontAwesomeIcon icon={faTrash} />
+                </Button>
+                <Button onClick={stopRecording} size="icon" className="bg-primary hover:bg-primary/90 text-primary-foreground rounded-full h-11 w-11 shadow-lg shadow-primary/20">
+                  <FontAwesomeIcon icon={faPaperPlane} className="h-4 w-4" />
+                </Button>
+              </div>
             </div>
-          </div>
-
-          <form onSubmit={handleSendMessage} className="flex-1 flex items-center gap-2">
-            <Input 
-              placeholder="Type a message..."
-              value={inputText}
-              onChange={(e) => {
-                setInputText(e.target.value);
+          ) : (
+            <>
+              <div className="flex items-center">
+                <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-primary transition-colors" onClick={() => handleFileClick('file')}>
+                  <FontAwesomeIcon icon={faPaperclip} className="h-5 w-5" />
+                </Button>
                 
-                // Typing indicator logic
-                if (chat && me) {
-                  const socket = getSocket();
-                  if (socket) {
-                    const sid = Number(me.id);
-                    const rid = Number(chat.id);
-                    console.log(`Sending typing event: ${sid} -> ${rid}`);
-                    socket.emit('typing', { senderId: sid, receiverId: rid });
-                    
-                    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
-                    typingTimeoutRef.current = setTimeout(() => {
-                      console.log(`Sending stopTyping event: ${sid} -> ${rid}`);
-                      socket.emit('stopTyping', { senderId: sid, receiverId: rid });
-                    }, 3000);
-                  }
-                }
-              }}
-              onFocus={() => {
-                if (chat) {
-                  markSeenApi(chat.id).then(() => {
-                    dispatch(clearUnreadCount(chat.id));
-                  }).catch(err => console.error('Failed to mark as seen:', err));
-                }
-              }}
-              className="flex-1 bg-background border-none focus-visible:ring-1 focus-visible:ring-primary/20 h-10 px-4 rounded-full"
-            />
-            
-            <Button 
-              type="submit" 
-              size="icon" 
-              disabled={!inputText.trim() && !selectedFile}
-              className={cn(
-                "rounded-full h-10 w-10 transition-all duration-300",
-                (inputText.trim() || selectedFile) ? "bg-primary text-primary-foreground scale-100" : "bg-muted text-muted-foreground scale-90"
-              )}
-            >
-              <FontAwesomeIcon icon={faPaperPlane} className="h-4 w-4" />
-            </Button>
-          </form>
+                <div className="relative">
+                  <Button 
+                    variant="ghost" 
+                    size="icon" 
+                    className={cn("text-muted-foreground hover:text-primary transition-colors", isEmojiPickerOpen && "text-primary")}
+                    onClick={() => setIsEmojiPickerOpen(!isEmojiPickerOpen)}
+                  >
+                    <FontAwesomeIcon icon={faFaceSmile} className="h-5 w-5" />
+                  </Button>
+                  
+                  {isEmojiPickerOpen && (
+                    <div className="absolute bottom-full left-0 mb-4 z-50" ref={pickerRef}>
+                      <EmojiPicker 
+                        onEmojiClick={handleEmojiClick}
+                        theme={Theme.AUTO}
+                        width={320}
+                        height={400}
+                      />
+                    </div>
+                  )}
+                </div>
+              </div>
 
-          <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-primary transition-colors">
-            <FontAwesomeIcon icon={faMicrophone} className="h-5 w-5" />
-          </Button>
+              <form onSubmit={handleSendMessage} className="flex-1 flex items-center gap-2">
+                <Input 
+                  placeholder="Type a message..."
+                  value={inputText}
+                  onChange={(e) => {
+                    setInputText(e.target.value);
+                    if (chat && me) {
+                      const socket = getSocket();
+                      if (socket) {
+                        const sid = Number(me.id);
+                        const rid = Number(chat.id);
+                        socket.emit('typing', { senderId: sid, receiverId: rid });
+                        if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+                        typingTimeoutRef.current = setTimeout(() => {
+                          socket.emit('stopTyping', { senderId: sid, receiverId: rid });
+                        }, 3000);
+                      }
+                    }
+                  }}
+                  onFocus={() => {
+                    if (chat) {
+                      markSeenApi(chat.id).then(() => {
+                        dispatch(clearUnreadCount(chat.id));
+                      }).catch(err => console.error('Failed to mark as seen:', err));
+                    }
+                  }}
+                  className="flex-1 bg-background border-none focus-visible:ring-1 focus-visible:ring-primary/20 h-10 px-4 rounded-full"
+                />
+                
+                <Button 
+                  type="submit" 
+                  size="icon" 
+                  disabled={!inputText.trim() && !selectedFile}
+                  className={cn(
+                    "rounded-full h-10 w-10 transition-all duration-300",
+                    (inputText.trim() || selectedFile) ? "bg-primary text-primary-foreground scale-100" : "bg-muted text-muted-foreground scale-90 hidden"
+                  )}
+                >
+                  <FontAwesomeIcon icon={faPaperPlane} className="h-4 w-4" />
+                </Button>
+              </form>
+
+              {!inputText.trim() && !selectedFile && (
+                <Button variant="ghost" size="icon" onClick={startRecording} className="text-muted-foreground hover:text-primary transition-colors">
+                  <FontAwesomeIcon icon={faMicrophone} className="h-5 w-5" />
+                </Button>
+              )}
+            </>
+          )}
         </div>
       </div>
       
