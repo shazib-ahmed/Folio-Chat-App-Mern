@@ -21,6 +21,7 @@ model User {
   avatar        String?
   isOnline      Boolean   @default(false)
   lastSeen      DateTime  @default(now())
+  refreshToken  String?   @db.Text
   
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt

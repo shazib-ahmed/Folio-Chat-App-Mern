@@ -11,6 +11,7 @@ import { usePageTitle } from '@/shared/hooks/usePageTitle';
 import { Chat, Message } from '@/features/chat/types';
 import { cn } from '@/shared/lib/utils';
 import { Card, CardContent, CardHeader, CardTitle } from '@/shared/ui/card';
+import { ProtectedRoute, PublicRoute } from '@/routes/ProtectedRoute';
 
 const MOCK_CHATS: Chat[] = [
   {
@@ -174,15 +175,67 @@ function ChatLayout() {
 }
 
 function App() {
+  React.useEffect(() => {
+    const savedTheme = localStorage.getItem('theme') || 'dark';
+    const root = window.document.documentElement;
+    if (savedTheme === 'dark') {
+      root.classList.add('dark');
+    } else {
+      root.classList.remove('dark');
+    }
+  }, []);
+
   return (
     <Router>
       <Routes>
-        <Route path="/auth" element={<AuthPage />} />
-        <Route path="/" element={<ChatLayout />} />
-        <Route path="/messages/:chatId" element={<ChatLayout />} />
-        <Route path="/profile" element={<ChatLayout />} />
-        <Route path="/credentials" element={<ChatLayout />} />
-        <Route path="/settings" element={<ChatLayout />} />
+        <Route 
+          path="/auth" 
+          element={
+            <PublicRoute>
+              <AuthPage />
+            </PublicRoute>
+          } 
+        />
+        <Route 
+          path="/" 
+          element={
+            <ProtectedRoute>
+              <ChatLayout />
+            </ProtectedRoute>
+          } 
+        />
+        <Route 
+          path="/messages/:chatId" 
+          element={
+            <ProtectedRoute>
+              <ChatLayout />
+            </ProtectedRoute>
+          } 
+        />
+        <Route 
+          path="/profile" 
+          element={
+            <ProtectedRoute>
+              <ChatLayout />
+            </ProtectedRoute>
+          } 
+        />
+        <Route 
+          path="/credentials" 
+          element={
+            <ProtectedRoute>
+              <ChatLayout />
+            </ProtectedRoute>
+          } 
+        />
+        <Route 
+          path="/settings" 
+          element={
+            <ProtectedRoute>
+              <ChatLayout />
+            </ProtectedRoute>
+          } 
+        />
       </Routes>
     </Router>
   );

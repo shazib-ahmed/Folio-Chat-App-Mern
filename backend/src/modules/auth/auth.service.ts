@@ -4,26 +4,41 @@ import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import * as bcrypt from 'bcrypt';
 import { JwtService } from '@nestjs/jwt';
+import { ConfigService } from '@nestjs/config';
 
 @Injectable()
 export class AuthService {
   constructor(
     private prisma: PrismaService,
     private jwtService: JwtService,
+    private configService: ConfigService,
   ) {}
 
   async register(dto: RegisterDto) {
-    const existingUser = await this.prisma.user.findFirst({
-      where: {
-        OR: [
-          { email: dto.email },
-          { username: dto.username },
-        ],
-      },
+    // Check if email already exists
+    const existingEmail = await this.prisma.user.findUnique({
+      where: { email: dto.email },
     });
+    if (existingEmail) {
+      throw new ConflictException('Email already exists');
+    }
 
-    if (existingUser) {
-      throw new ConflictException('User already exists');
+    // Check if username already exists
+    const existingUsername = await this.prisma.user.findUnique({
+      where: { username: dto.username },
+    });
+    if (existingUsername) {
+      throw new ConflictException('Username already taken');
+    }
+
+    // Check if phone already exists (if provided)
+    if (dto.phone) {
+      const existingPhone = await this.prisma.user.findUnique({
+        where: { phone: dto.phone },
+      });
+      if (existingPhone) {
+        throw new ConflictException('Phone number already exists');
+      }
     }
 
     const hashedPassword = await bcrypt.hash(dto.password, 10);
@@ -35,7 +50,14 @@ export class AuthService {
       },
     });
 
-    return this.generateToken(user.id, user.username);
+    const tokens = await this.getTokens(user.id, user.username);
+    await this.updateRefreshToken(user.id, tokens.refresh_token);
+
+    const { password, refreshToken, ...userWithoutPassword } = user;
+    return {
+      ...tokens,
+      user: userWithoutPassword,
+    };
   }
 
   async login(dto: LoginDto) {
@@ -59,17 +81,75 @@ export class AuthService {
       throw new UnauthorizedException('Invalid credentials');
     }
 
-    return this.generateToken(user.id, user.username);
+    const tokens = await this.getTokens(user.id, user.username);
+    await this.updateRefreshToken(user.id, tokens.refresh_token);
+
+    const { password, refreshToken, ...userWithoutPassword } = user;
+    return {
+      ...tokens,
+      user: userWithoutPassword,
+    };
   }
 
-  private generateToken(userId: number, username: string) {
-    const payload = { sub: userId, username };
+  async logout(userId: number) {
+    return this.prisma.user.update({
+      where: { id: userId },
+      data: { refreshToken: null },
+    });
+  }
+
+  async refreshTokens(refreshToken: string) {
+    try {
+      const payload = await this.jwtService.verifyAsync(refreshToken, {
+        secret: this.configService.get<string>('JWT_SECRET') || 'fallbackSecret',
+      });
+      
+      const userId = payload.sub;
+      const user = await this.prisma.user.findUnique({
+        where: { id: userId },
+      });
+
+      if (!user || !user.refreshToken) {
+        throw new UnauthorizedException('Access Denied');
+      }
+
+      const refreshTokenMatches = await bcrypt.compare(refreshToken, user.refreshToken);
+      if (!refreshTokenMatches) {
+        throw new UnauthorizedException('Access Denied');
+      }
+
+      const tokens = await this.getTokens(user.id, user.username);
+      await this.updateRefreshToken(user.id, tokens.refresh_token);
+
+      return tokens;
+    } catch (e) {
+      throw new UnauthorizedException('Invalid refresh token');
+    }
+  }
+
+  async updateRefreshToken(userId: number, refreshToken: string) {
+    const hashedRefreshToken = await bcrypt.hash(refreshToken, 10);
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { refreshToken: hashedRefreshToken },
+    });
+  }
+
+  async getTokens(userId: number, username: string) {
+    const [accessToken, refreshToken] = await Promise.all([
+      this.jwtService.signAsync(
+        { sub: userId, username },
+        { expiresIn: '1d' },
+      ),
+      this.jwtService.signAsync(
+        { sub: userId, username },
+        { expiresIn: '365d' },
+      ),
+    ]);
+
     return {
-      access_token: this.jwtService.sign(payload),
-      user: {
-        id: userId,
-        username,
-      },
+      access_token: accessToken,
+      refresh_token: refreshToken,
     };
   }
 }

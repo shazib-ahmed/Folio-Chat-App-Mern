@@ -2,6 +2,10 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { cn } from '@/shared/lib/utils';
 import { ScrollArea } from "@/shared/ui/scroll-area";
+import { useDispatch, useSelector } from 'react-redux';
+import { logout } from '@/features/auth/authSlice';
+import { logoutApi } from '@/features/auth/authService';
+import { RootState } from '@/app/store';
 import { Input } from "@/shared/ui/input";
 import { Button } from "@/shared/ui/button";
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
@@ -18,10 +22,23 @@ interface ChatSidebarProps {
 
 export function ChatSidebar({ chats, activeChatId }: ChatSidebarProps) {
   const navigate = useNavigate();
+  const dispatch = useDispatch();
+  const { user } = useSelector((state: RootState) => state.auth);
   const [view, setView] = React.useState<'chats' | 'settings'>('chats');
 
   const handleChatSelect = (id: string) => {
     navigate(`/messages/${id}`);
+  };
+
+  const handleLogout = async () => {
+    try {
+      await logoutApi();
+    } catch (err) {
+      console.error('Logout error:', err);
+    } finally {
+      dispatch(logout());
+      navigate('/auth');
+    }
   };
 
   const settingsOptions = [
@@ -35,8 +52,8 @@ export function ChatSidebar({ chats, activeChatId }: ChatSidebarProps) {
       {/* Header */}
       <div className="h-[60px] bg-[hsl(var(--sidebar-header-bg))] px-4 flex items-center justify-between shrink-0">
         <Avatar className="h-10 w-10">
-          <AvatarImage src="https://github.com/shadcn.png" />
-          <AvatarFallback>JD</AvatarFallback>
+          <AvatarImage src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${user?.username || 'user'}`} />
+          <AvatarFallback>{user?.username?.substring(0, 2).toUpperCase() || 'US'}</AvatarFallback>
         </Avatar>
         <div className="flex gap-2 items-center text-muted-foreground">
           <ThemeSwitcher />
@@ -55,7 +72,12 @@ export function ChatSidebar({ chats, activeChatId }: ChatSidebarProps) {
           >
              <FontAwesomeIcon icon={view === 'chats' ? faGear : faArrowLeft} className="h-5 w-5 cursor-pointer" />
           </Button>
-          <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-destructive transition-colors">
+          <Button 
+            variant="ghost" 
+            size="icon" 
+            onClick={handleLogout}
+            className="text-muted-foreground hover:text-destructive transition-colors"
+          >
             <FontAwesomeIcon icon={faRightFromBracket} className="h-5 w-5 cursor-pointer" />
           </Button>
         </div>

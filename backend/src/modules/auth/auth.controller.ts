@@ -1,8 +1,11 @@
-import { Body, Controller, Post, HttpCode, HttpStatus, UseInterceptors } from '@nestjs/common';
+import { Body, Controller, Post, HttpCode, HttpStatus, UseInterceptors, UseGuards, Req } from '@nestjs/common';
 import { AnyFilesInterceptor } from '@nestjs/platform-express';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
+import { RefreshTokenDto } from './dto/refresh-token.dto';
+import { JwtAuthGuard } from './guards/jwt-auth.guard';
+import * as express from 'express';
 
 @Controller('auth')
 @UseInterceptors(AnyFilesInterceptor())
@@ -18,5 +21,19 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   login(@Body() dto: LoginDto) {
     return this.authService.login(dto);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('logout')
+  @HttpCode(HttpStatus.OK)
+  logout(@Req() req: express.Request) {
+    const user = req.user as any;
+    return this.authService.logout(user.userId);
+  }
+
+  @Post('refresh')
+  @HttpCode(HttpStatus.OK)
+  refresh(@Body() dto: RefreshTokenDto) {
+    return this.authService.refreshTokens(dto.refreshToken);
   }
 }
