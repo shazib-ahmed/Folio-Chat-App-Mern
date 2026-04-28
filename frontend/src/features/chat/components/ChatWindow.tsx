@@ -10,7 +10,7 @@ import { Chat, Message } from "../types";
 import { cn } from "@/shared/lib/utils";
 
 import { getMessagesApi, sendMessageApi, markSeenApi, blockUserApi, unblockUserApi, acceptRequestApi, searchMessagesApi, getPublicKeyApi } from '../chatService';
-import { encryptForRecipient, decryptWithPrivateKey, getLocalPrivateKey } from '@/shared/lib/cryptoUtils';
+import { encryptForBoth, decryptMessage, getLocalPrivateKey } from '@/shared/lib/cryptoUtils';
 import { subscribeToMessages, getSocket } from '@/shared/lib/socket';
 import { useSelector, useDispatch } from 'react-redux';
 import { RootState, AppDispatch } from '@/app/store';
@@ -49,6 +49,7 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
   const [searchResults, setSearchResults] = useState<string[]>([]);
   const [searchMatchIndex, setSearchMatchIndex] = useState(-1);
   const [recipientPublicKey, setRecipientPublicKey] = useState<string | null>(null);
+  const [myPublicKey, setMyPublicKey] = useState<string | null>(null);
   
   const dispatch = useDispatch<AppDispatch>();
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -85,17 +86,20 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
       setIsLoadingMessages(true);
       setLocalMessages([]); // Clear messages immediately when switching chats
       setRecipientPublicKey(null);
+      setMyPublicKey(null);
 
-      // Fetch recipient's public key
-      getPublicKeyApi(chat.username).then(key => {
-        setRecipientPublicKey(key);
-      }).catch(err => console.error('Failed to fetch public key:', err));
+      // Fetch public keys
+      if (me?.username) {
+        getPublicKeyApi(chat.username).then(key => setRecipientPublicKey(key)).catch(e => console.error(e));
+        getPublicKeyApi(me.username).then(key => setMyPublicKey(key)).catch(e => console.error(e));
+      }
 
       (getMessagesApi(chat.username) as Promise<any>).then(async data => {
         const privateKey = await getLocalPrivateKey();
         const decryptedMessages = await Promise.all((data.messages || []).map(async (msg: any) => {
           if (msg.isEncrypted && privateKey && msg.text) {
-            return { ...msg, text: await decryptWithPrivateKey(msg.text, privateKey) };
+            const isSender = String(msg.senderId) === String(me?.id);
+            return { ...msg, text: await decryptMessage(msg.text, privateKey, isSender) };
           }
           return msg;
         }));
@@ -116,7 +120,7 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
     } else {
       setLocalMessages([]);
     }
-  }, [chat?.username, chat?.id, dispatch]);
+  }, [chat?.id, chat?.username, me?.id, me?.username, dispatch]);
 
   // Handle message search with debounce and cancellation
   useEffect(() => {
@@ -199,7 +203,9 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
       }
 
       if (msg.type === 'chatRequestAccepted') {
-        if (chat && (String(msg.acceptedBy) === String(chat.id))) {
+        const activeChat = currentChatRef.current;
+        console.log('Chat request accepted event received:', msg, 'Active chat:', activeChat?.id);
+        if (activeChat && (String(msg.acceptedBy) === String(activeChat.id))) {
           setChatStatus('ACCEPTED');
         }
         return;
@@ -229,33 +235,56 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
       // Handle new messages with decryption
       if (chat && (String(msg.senderId) === String(chat.id) || String(msg.receiverId) === String(chat.id) || String(msg.senderId) === String(me?.id) || String(msg.receiverId) === String(me?.id))) {
         
-        let decryptedMsg = { ...msg };
-        if (msg.isEncrypted && msg.text) {
-          const privateKey = await getLocalPrivateKey();
-          if (privateKey) {
-            decryptedMsg.text = await decryptWithPrivateKey(msg.text, privateKey);
+        const privateKey = await getLocalPrivateKey();
+        let decryptedText = msg.text;
+
+        if (msg.isEncrypted && msg.text && privateKey) {
+          try {
+            const isSender = String(msg.senderId) === String(me?.id);
+            decryptedText = await decryptMessage(msg.text, privateKey, isSender);
+          } catch (err) {
+            console.error('Real-time decryption failed:', err);
           }
         }
 
+        const decryptedMsg = { 
+          ...msg,
+          text: decryptedText
+        };
+
         setLocalMessages(prev => {
-          // If this is my own message coming from socket, replace the pending one
           const isMine = String(msg.senderId) === String(me?.id);
           
-          if (isMine) {
-            const tempIndex = prev.findIndex(m => 
-              m.id.toString().startsWith('temp-') && 
-              (m.text === msg.text || (m.messageType === msg.messageType && msg.messageType !== 'TEXT'))
-            );
+          if (isMine && msg.clientMsgId) {
+            // Find the specific temp message using clientMsgId
+            const tempIndex = prev.findIndex(m => m.id === msg.clientMsgId);
             
             if (tempIndex !== -1) {
               const newMsgs = [...prev];
-              newMsgs[tempIndex] = decryptedMsg;
+              // Ensure we don't overwrite with empty text if decryption failed
+              const finalMsg = {
+                ...decryptedMsg,
+                text: decryptedMsg.text || prev[tempIndex].text
+              };
+              newMsgs[tempIndex] = finalMsg;
               return newMsgs;
             }
           }
 
-          // Check for duplicates by ID
-          if (prev.some(m => m.id === msg.id)) return prev;
+          // Fallback to old matching logic if clientMsgId is missing
+          if (isMine) {
+            const tempIndex = [...prev].reverse().findIndex(m => 
+              String(m.id).startsWith('temp-') || String(m.id).startsWith('cmsg-')
+            );
+            if (tempIndex !== -1) {
+              const actualIndex = prev.length - 1 - tempIndex;
+              const newMsgs = [...prev];
+              newMsgs[actualIndex] = { ...decryptedMsg, text: decryptedMsg.text || prev[actualIndex].text };
+              return newMsgs;
+            }
+          }
+
+          if (prev.some(m => String(m.id) === String(msg.id))) return prev;
           return [...prev, decryptedMsg];
         });
 
@@ -323,10 +352,10 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
     let finalMessage = inputText;
     let isEncrypted = false;
 
-    // Encrypt message if public key is available and it's a text message or has a caption
-    if (recipientPublicKey && inputText.trim()) {
+    // Encrypt message if public keys are available
+    if (recipientPublicKey && myPublicKey && inputText.trim()) {
       try {
-        finalMessage = await encryptForRecipient(inputText, recipientPublicKey);
+        finalMessage = await encryptForBoth(inputText, recipientPublicKey, myPublicKey);
         isEncrypted = true;
       } catch (err) {
         console.error("Encryption failed, sending as plain text:", err);
@@ -352,32 +381,49 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
       formData.append('type', 'TEXT');
     }
 
+    const clientMsgId = `cmsg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    const mappedType = audioBlob ? 'AUDIO' : (selectedFile ? (['IMAGE', 'VIDEO', 'AUDIO'].includes(selectedFile.type.split('/')[0].toUpperCase()) ? selectedFile.type.split('/')[0].toUpperCase() as any : 'FILE') : 'TEXT');
+
     try {
       // Optimistic Update
       const optimisticMsg: Message = {
-        id: 'temp-' + Date.now(),
+        id: clientMsgId,
         senderId: me.id.toString(),
         text: inputText,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         status: 'pending' as any,
-        messageType: audioBlob ? 'AUDIO' : (selectedFile ? (['IMAGE', 'VIDEO', 'AUDIO'].includes(selectedFile.type.split('/')[0].toUpperCase()) ? selectedFile.type.split('/')[0].toUpperCase() as any : 'FILE') : 'TEXT'),
+        messageType: mappedType,
         fileUrl: audioBlob ? URL.createObjectURL(audioBlob) : (filePreview || undefined),
         fileName: audioBlob ? 'Voice Note' : selectedFile?.name,
         fileSize: audioBlob ? `${(audioBlob.size / 1024).toFixed(1)} KB` : (selectedFile ? `${(selectedFile.size / 1024 / 1024).toFixed(2)} MB` : undefined),
+        isEncrypted: isEncrypted
       };
 
       setLocalMessages(prev => [...prev, optimisticMsg]);
+      const lastText = inputText;
       setInputText("");
       removeSelectedFile();
 
-      const response = await sendMessageApi(formData);
+      const response = await sendMessageApi(
+        chat.id, 
+        finalMessage, 
+        mappedType, 
+        audioBlob ? (new File([audioBlob], 'voice-note.webm')) : selectedFile || undefined, 
+        isEncrypted, 
+        clientMsgId
+      );
       
-      // Replace optimistic message with real one from server
-      setLocalMessages(prev => prev.map(m => m.id === optimisticMsg.id ? response : m));
+      // The socket listener will handle the replacement, but we can also do it here for extra safety
+      // But we must decrypt the response if it's encrypted
+      const privateKey = await getLocalPrivateKey();
+      const decryptedRes = {
+        ...response,
+        text: (response.isEncrypted && privateKey) ? await decryptMessage(response.message, privateKey, true) : (response.message || lastText)
+      };
+      setLocalMessages(prev => prev.map(m => m.id === clientMsgId ? decryptedRes : m));
     } catch (err: any) {
       console.error('Failed to send message:', err);
-      // Remove optimistic message on failure
-      setLocalMessages(prev => prev.filter(m => !m.id.toString().startsWith('temp-')));
+      setLocalMessages(prev => prev.filter(m => m.id !== clientMsgId));
       alert(err.response?.data?.message || err.message || "Failed to send message. You might be blocked.");
     } finally {
       setIsUploading(false);
@@ -516,7 +562,8 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
         const privateKey = await getLocalPrivateKey();
         const decryptedMessages = await Promise.all(data.messages.map(async (msg: any) => {
           if (msg.isEncrypted && privateKey && msg.text) {
-            return { ...msg, text: await decryptWithPrivateKey(msg.text, privateKey) };
+            const isSender = String(msg.senderId) === String(me?.id);
+            return { ...msg, text: await decryptMessage(msg.text, privateKey, isSender) };
           }
           return msg;
         }));

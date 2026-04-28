@@ -47,14 +47,20 @@ const chatSlice = createSlice({
       isMine?: boolean;
       sender?: any;
       receiver?: any;
+      isEncrypted?: boolean;
+      lastMessageSenderId?: string;
     }>) => {
-      const { chatId, message, time, isMine, sender, receiver } = action.payload;
+      const { chatId, message, time, isMine, sender, receiver, isEncrypted, lastMessageSenderId } = action.payload;
       const chatIndex = state.chats.findIndex(c => c.id === chatId);
       
       if (chatIndex !== -1) {
         const chat = { ...state.chats[chatIndex] };
-        chat.lastMessage = isMine ? `You: ${message}` : message;
+        // For encrypted messages, we store the raw message. 
+        // For plain text, we prepend "You: " if it's mine.
+        chat.lastMessage = (isMine && !isEncrypted) ? `You: ${message}` : message;
         chat.lastMessageTime = time;
+        chat.isEncrypted = isEncrypted;
+        chat.lastMessageSenderId = lastMessageSenderId;
         
         if (!isMine) {
           chat.unreadCount = (chat.unreadCount || 0) + 1;
@@ -72,7 +78,9 @@ const chatSlice = createSlice({
           online: sender.online,
           lastMessage: message,
           lastMessageTime: time,
-          unreadCount: 1
+          unreadCount: 1,
+          isEncrypted: isEncrypted,
+          lastMessageSenderId: lastMessageSenderId
         };
         state.chats = [newChat, ...state.chats];
       } else if (isMine && receiver) {
@@ -83,9 +91,11 @@ const chatSlice = createSlice({
           username: receiver.username,
           avatar: receiver.avatar,
           online: receiver.online,
-          lastMessage: `You: ${message}`,
+          lastMessage: isEncrypted ? message : `You: ${message}`,
           lastMessageTime: time,
-          unreadCount: 0
+          unreadCount: 0,
+          isEncrypted: isEncrypted,
+          lastMessageSenderId: lastMessageSenderId
         };
         state.chats = [newChat, ...state.chats];
       }

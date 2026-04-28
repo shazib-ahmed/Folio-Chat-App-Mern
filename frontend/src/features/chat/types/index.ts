@@ -24,6 +24,7 @@ export interface Message {
     name?: string;
     size?: string;
   };
+  isEncrypted?: boolean;
 }
 
 export interface Chat {
@@ -32,6 +33,8 @@ export interface Chat {
   username: string;
   avatar: string;
   lastMessage?: string;
+  lastMessageSenderId?: string;
+  isEncrypted?: boolean;
   lastMessageTime?: string;
   unreadCount?: number;
   online?: boolean;

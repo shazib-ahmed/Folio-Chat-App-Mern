@@ -37,10 +37,11 @@ export class ChatController {
     @Body('message') message: string,
     @Body('type') type: MessageType,
     @Body('isEncrypted') isEncrypted?: string,
+    @Body('clientMsgId') clientMsgId?: string,
     @UploadedFile() file?: Express.Multer.File,
   ) {
     const user = req.user as any;
-    return this.chatService.sendMessage(user.userId, Number(receiverId), message, type, file, String(isEncrypted) === 'true');
+    return this.chatService.sendMessage(user.userId, Number(receiverId), message, type, file, String(isEncrypted) === 'true', clientMsgId);
   }
 
   @Get('messages/:username')

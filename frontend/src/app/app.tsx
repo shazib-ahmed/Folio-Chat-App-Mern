@@ -19,7 +19,7 @@ import { useDispatch, useSelector } from 'react-redux';
 import { RootState, AppDispatch } from '@/app/store';
 import { initiateSocketConnection, disconnectSocket, subscribeToMessages, getSocket } from '@/shared/lib/socket';
 import { fetchChatList, updateChatLastMessage, setTypingStatus, setUserStatus } from '@/features/chat/chatSlice';
-import { getUserByUsernameApi, setPublicKeyApi } from '@/features/chat/chatService';
+import { getUserByUsernameApi, setPublicKeyApi, getPublicKeyApi } from '@/features/chat/chatService';
 import { generateE2EEKeys, savePrivateKey, exportPublicKey, getLocalPrivateKey } from '@/shared/lib/cryptoUtils';
 
 function ChatLayout() {
@@ -37,26 +37,42 @@ function ChatLayout() {
     if (user?.id) {
       initiateSocketConnection(user.id);
 
-      // Initialize E2EE Keys
-      (async () => {
+      const initializeE2EE = async () => {
         try {
-          const existingKey = await getLocalPrivateKey();
-          if (!existingKey) {
+          // Check if user has a public key on the server
+          const serverPubKey = await getPublicKeyApi(user.username);
+          let privateKey = await getLocalPrivateKey();
+
+          if (!privateKey) {
             console.log("Generating new E2EE keys...");
             const keys = await generateE2EEKeys();
             await savePrivateKey(keys.privateKey);
             const pubPem = await exportPublicKey(keys.publicKey);
             await setPublicKeyApi(pubPem);
-            console.log("E2EE keys registered.");
+            console.log("E2EE keys generated and registered.");
+          } else if (!serverPubKey) {
+            console.log("Local key exists but missing on server. Re-registering...");
+            // If serverPubKey is missing, we regenerate to ensure we have a valid key pair
+            const keys = await generateE2EEKeys();
+            await savePrivateKey(keys.privateKey);
+            const pubPem = await exportPublicKey(keys.publicKey);
+            await setPublicKeyApi(pubPem);
+            console.log("E2EE keys re-synchronized with server.");
           }
         } catch (err) {
           console.error("Failed to initialize E2EE:", err);
         }
-      })();
+      };
+      initializeE2EE();
     }
 
     const handleBeforeUnload = () => {
-      disconnectSocket();
+      if (user?.id) {
+        const socket = getSocket();
+        if (socket) {
+          socket.emit('userOffline', { userId: user.id });
+        }
+      }
     };
 
     window.addEventListener('beforeunload', handleBeforeUnload);
@@ -65,7 +81,7 @@ function ChatLayout() {
       window.removeEventListener('beforeunload', handleBeforeUnload);
       disconnectSocket();
     };
-  }, [user?.id]);
+  }, [user?.id, user?.username, dispatch]);
 
   React.useEffect(() => {
     dispatch(fetchChatList());
@@ -100,7 +116,9 @@ function ChatLayout() {
             time: msg.timestamp,
             isMine: isMine,
             sender: msg.sender,
-            receiver: msg.receiver
+            receiver: msg.receiver,
+            isEncrypted: msg.isEncrypted,
+            lastMessageSenderId: String(msg.senderId)
           }));
         }
       }

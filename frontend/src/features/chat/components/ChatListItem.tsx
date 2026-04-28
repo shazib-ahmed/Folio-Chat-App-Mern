@@ -1,9 +1,10 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Avatar, AvatarFallback, AvatarImage } from "@/shared/ui/avatar";
 import { cn } from "@/shared/lib/utils";
 import { Chat } from "../types";
 import { useSelector } from 'react-redux';
 import { RootState } from '@/app/store';
+import { decryptMessage, getLocalPrivateKey } from '@/shared/lib/cryptoUtils';
 
 interface ChatListItemProps {
   chat: Chat;
@@ -13,7 +14,31 @@ interface ChatListItemProps {
 
 export function ChatListItem({ chat, isActive, onClick }: ChatListItemProps) {
   const typingUsers = useSelector((state: RootState) => state.chat.typingUsers);
+  const { user: me } = useSelector((state: RootState) => state.auth);
   const isTyping = !!typingUsers[chat.id];
+  const [displayText, setDisplayText] = useState<string | undefined>(chat.lastMessage);
+
+  useEffect(() => {
+    const handleDecryption = async () => {
+      if (chat.isEncrypted && chat.lastMessage) {
+        const privateKey = await getLocalPrivateKey();
+        if (privateKey) {
+          try {
+            const isSender = String(chat.lastMessageSenderId) === String(me?.id);
+            const decrypted = await decryptMessage(chat.lastMessage, privateKey, isSender);
+            setDisplayText((isSender ? "You: " : "") + decrypted);
+          } catch (err) {
+            console.log('Sidebar raw message:', chat.lastMessage);
+            console.error('Sidebar decryption failed:', err);
+            setDisplayText(chat.lastMessageSenderId === String(me?.id) ? "You: [Encrypted]" : "[Encrypted]");
+          }
+        }
+      } else {
+        setDisplayText(chat.lastMessage);
+      }
+    };
+    handleDecryption();
+  }, [chat.lastMessage, chat.isEncrypted, chat.lastMessageSenderId, me?.id]);
 
   return (
     <div
@@ -54,14 +79,14 @@ export function ChatListItem({ chat, isActive, onClick }: ChatListItemProps) {
           )}>
             {isTyping ? (
               <span className="animate-pulse">typing...</span>
-            ) : chat.lastMessage?.startsWith('http') ? (
+            ) : displayText?.startsWith('http') ? (
               <span className="flex items-center gap-1">
-                {chat.lastMessage.match(/\.(jpeg|jpg|gif|png|webp)$/i) ? '📷 Photo' : 
-                 chat.lastMessage.match(/\.(mp4|webm|ogg)$/i) ? '🎥 Video' : 
-                 chat.lastMessage.match(/\.(mp3|wav|ogg)$/i) ? '🎵 Audio' : '📄 File'}
+                {displayText.match(/\.(jpeg|jpg|gif|png|webp)$/i) ? '📷 Photo' : 
+                 displayText.match(/\.(mp4|webm|ogg)$/i) ? '🎥 Video' : 
+                 displayText.match(/\.(mp3|wav|ogg)$/i) ? '🎵 Audio' : '📄 File'}
               </span>
             ) : (
-              chat.lastMessage
+              displayText
             )}
           </p>
           {chat.unreadCount ? (

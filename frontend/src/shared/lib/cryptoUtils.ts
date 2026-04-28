@@ -42,6 +42,25 @@ export const getLocalPrivateKey = async (): Promise<CryptoKey | null> => {
   });
 };
 
+// --- Helpers ---
+
+const uint8ArrayToBase64 = (arr: Uint8Array): string => {
+  let binary = "";
+  for (let i = 0; i < arr.length; i++) {
+    binary += String.fromCharCode(arr[i]);
+  }
+  return btoa(binary);
+};
+
+const base64ToUint8Array = (base64: string): Uint8Array => {
+  const binary = atob(base64);
+  const arr = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    arr[i] = binary.charCodeAt(i);
+  }
+  return arr;
+};
+
 // --- Key Management ---
 
 export const generateE2EEKeys = async (): Promise<CryptoKeyPair> => {
@@ -50,27 +69,29 @@ export const generateE2EEKeys = async (): Promise<CryptoKeyPair> => {
 
 export const exportPublicKey = async (publicKey: CryptoKey): Promise<string> => {
   const exported = await window.crypto.subtle.exportKey("spki", publicKey);
-  return btoa(String.fromCharCode(...Array.from(new Uint8Array(exported))));
+  return uint8ArrayToBase64(new Uint8Array(exported));
 };
 
 export const importPublicKey = async (pem: string): Promise<CryptoKey> => {
-  const binary = atob(pem);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  return window.crypto.subtle.importKey("spki", bytes.buffer, KEY_PAIR_ALGORITHM, true, ["encrypt"]);
+  const bytes = base64ToUint8Array(pem);
+  return window.crypto.subtle.importKey("spki", bytes.buffer as ArrayBuffer, KEY_PAIR_ALGORITHM, true, ["encrypt"]);
 };
 
 // --- Encryption / Decryption ---
 
 /**
- * Hybrid Encryption:
+ * Hybrid Encryption (Multi-Recipient):
  * 1. Generates random AES-GCM key.
  * 2. Encrypts text with AES-GCM.
- * 3. Encrypts AES key with Recipient's RSA Public Key.
+ * 3. Encrypts AES key TWICE:
+ *    - Once with the recipient's RSA Public Key.
+ *    - Once with the sender's RSA Public Key.
  * 4. Returns combined base64 string.
+ * Format: IV(12) | SenderEncAesKey(256) | RecipientEncAesKey(256) | EncryptedContent
  */
-export const encryptForRecipient = async (text: string, publicKeyPem: string): Promise<string> => {
-  const publicKey = await importPublicKey(publicKeyPem);
+export const encryptForBoth = async (text: string, recipientPubKeyPem: string, senderPubKeyPem: string): Promise<string> => {
+  const recipientKey = await importPublicKey(recipientPubKeyPem);
+  const senderKey = await importPublicKey(senderPubKeyPem);
 
   // 1. Generate random AES key
   const aesKey = await window.crypto.subtle.generateKey(
@@ -88,32 +109,43 @@ export const encryptForRecipient = async (text: string, publicKeyPem: string): P
     encodedText
   );
 
-  // 3. Encrypt AES key with RSA
+  // 3. Encrypt AES key for both parties
   const exportedAesKey = await window.crypto.subtle.exportKey("raw", aesKey);
-  const encryptedAesKey = await window.crypto.subtle.encrypt(
+  
+  const encryptedAesKeySender = await window.crypto.subtle.encrypt(
     { name: "RSA-OAEP" },
-    publicKey,
+    senderKey,
     exportedAesKey
   );
 
-  // 4. Combine: IV(12) | EncryptedAESKey(256) | EncryptedContent
-  const combined = new Uint8Array(12 + 256 + encryptedContent.byteLength);
-  combined.set(iv, 0);
-  combined.set(new Uint8Array(encryptedAesKey), 12);
-  combined.set(new Uint8Array(encryptedContent), 12 + 256);
+  const encryptedAesKeyRecipient = await window.crypto.subtle.encrypt(
+    { name: "RSA-OAEP" },
+    recipientKey,
+    exportedAesKey
+  );
 
-  return btoa(String.fromCharCode(...Array.from(combined)));
+  // 4. Combine: IV(12) | SenderKey(256) | RecipientKey(256) | Content
+  const combined = new Uint8Array(12 + 256 + 256 + encryptedContent.byteLength);
+  combined.set(iv, 0);
+  combined.set(new Uint8Array(encryptedAesKeySender), 12);
+  combined.set(new Uint8Array(encryptedAesKeyRecipient), 12 + 256);
+  combined.set(new Uint8Array(encryptedContent), 12 + 256 + 256);
+
+  return uint8ArrayToBase64(combined);
 };
 
-export const decryptWithPrivateKey = async (base64Cipher: string, privateKey: CryptoKey): Promise<string> => {
+export const decryptMessage = async (base64Cipher: string, privateKey: CryptoKey, isSender: boolean): Promise<string> => {
   try {
-    const binary = atob(base64Cipher);
-    const combined = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) combined[i] = binary.charCodeAt(i);
+    const combined = base64ToUint8Array(base64Cipher);
 
     const iv = combined.slice(0, 12);
-    const encryptedAesKey = combined.slice(12, 12 + 256);
-    const encryptedContent = combined.slice(12 + 256);
+    
+    // Pick the correct encrypted AES key based on whether we are the sender or receiver
+    const encryptedAesKey = isSender 
+      ? combined.slice(12, 12 + 256) 
+      : combined.slice(12 + 256, 12 + 256 + 256);
+      
+    const encryptedContent = combined.slice(12 + 256 + 256);
 
     // 1. Decrypt AES key with RSA
     const decryptedAesKeyRaw = await window.crypto.subtle.decrypt(
@@ -138,8 +170,12 @@ export const decryptWithPrivateKey = async (base64Cipher: string, privateKey: Cr
     );
 
     return new TextDecoder().decode(decryptedContent);
-  } catch (error) {
-    console.error("Decryption failed:", error);
+  } catch (error: any) {
+    console.error("Decryption failed detail:", {
+      error: error.message || error,
+      cipherLength: base64Cipher.length,
+      name: error.name
+    });
     return "[Unable to decrypt message]";
   }
 };

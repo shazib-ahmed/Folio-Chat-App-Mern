@@ -12,7 +12,7 @@ export class ChatService {
     private cloudinaryService: CloudinaryService,
   ) {}
 
-  async sendMessage(senderId: number, receiverId: number, content: string, type: MessageType, file?: Express.Multer.File, isEncrypted: boolean = false) {
+  async sendMessage(senderId: number, receiverId: number, content: string, type: MessageType, file?: Express.Multer.File, isEncrypted: boolean = false, clientMsgId?: string) {
     let fileUrl: string | null = null;
     let fileName: string | null = null;
     let fileSize: string | null = null;
@@ -62,6 +62,7 @@ export class ChatService {
       status: message.status.toLowerCase(),
       messageType: message.messageType,
       isEncrypted: message.isEncrypted,
+      clientMsgId,
       sender: {
         id: message.sender.id.toString(),
         name: message.sender.name || message.sender.username,
@@ -311,7 +312,8 @@ export class ChatService {
             name: otherUser.name || otherUser.username,
             username: otherUser.username,
             avatar: otherUser.avatar,
-            lastMessage: (msg.senderId === userId ? "You: " : "") + this.formatLastMessage(msg),
+            lastMessage: msg.isEncrypted ? msg.message : ((msg.senderId === userId ? "You: " : "") + this.formatLastMessage(msg)),
+            lastMessageSenderId: msg.senderId.toString(),
             lastMessageTime: this.formatTime(msg.createdAt),
             online: otherUser.isOnline,
             unreadCount: unreadCount,
