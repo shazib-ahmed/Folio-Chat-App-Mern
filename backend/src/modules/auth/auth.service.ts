@@ -162,7 +162,7 @@ export class AuthService {
     // Handle avatar upload if file is provided
     if (file) {
       try {
-        const upload = await this.cloudinary.uploadImage(file, 'users');
+        const upload = await this.cloudinary.uploadFile(file, 'users');
         dto.avatar = upload.secure_url;
         console.log(`Avatar uploaded to Cloudinary: ${dto.avatar}`);
       } catch (error) {

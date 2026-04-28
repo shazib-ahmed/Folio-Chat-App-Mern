@@ -1,14 +1,21 @@
 import React, { useState, useEffect, useRef } from 'react';
 import EmojiPicker, { Theme } from 'emoji-picker-react';
 import { Avatar, AvatarFallback, AvatarImage } from "@/shared/ui/avatar";
-import { ScrollArea } from "@/shared/ui/scroll-area";
 import { Input } from "@/shared/ui/input";
 import { Button } from "@/shared/ui/button";
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faBan, faSearch, faFaceSmile, faPaperclip, faMicrophone, faPaperPlane, faArrowLeft, faPhone, faVideo, faXmark, faTrash } from '@fortawesome/free-solid-svg-icons';
+import { faBan, faSearch, faFaceSmile, faPaperclip, faMicrophone, faPaperPlane, faArrowLeft, faPhone, faVideo, faXmark, faChevronDown } from '@fortawesome/free-solid-svg-icons';
 import { MessageBubble } from "./MessageBubble";
 import { Chat, Message } from "../types";
 import { useNavigate } from "react-router-dom";
+import { cn } from "@/shared/lib/utils";
+
+import { getMessagesApi, sendMessageApi, markSeenApi } from '../chatService';
+import { subscribeToMessages, getSocket } from '@/shared/lib/socket';
+import { useSelector, useDispatch } from 'react-redux';
+import { RootState, AppDispatch } from '@/app/store';
+import { Skeleton } from "@/shared/ui/skeleton";
+import { clearUnreadCount } from '../chatSlice';
 
 import {
   Dialog,
@@ -21,21 +28,120 @@ import {
 
 interface ChatWindowProps {
   chat?: Chat;
-  messages: Message[];
   onStartAudioCall?: (chat: Chat) => void;
   onStartVideoCall?: (chat: Chat) => void;
 }
 
-export function ChatWindow({ chat, messages, onStartAudioCall, onStartVideoCall }: ChatWindowProps) {
+export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWindowProps) {
+  const { user: me } = useSelector((state: RootState) => state.auth);
   const [inputText, setInputText] = useState("");
+  const [localMessages, setLocalMessages] = useState<Message[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [isEmojiPickerOpen, setIsEmojiPickerOpen] = useState(false);
   const [isBlockModalOpen, setIsBlockModalOpen] = useState(false);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [filePreview, setFilePreview] = useState<string | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const [isLoadingMessages, setIsLoadingMessages] = useState(false);
+  
   const navigate = useNavigate();
+  const dispatch = useDispatch<AppDispatch>();
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pickerRef = useRef<HTMLDivElement>(null);
+  const currentChatRef = useRef<Chat | undefined>(chat);
+  const [isTyping, setIsTyping] = useState(false);
+  const [showScrollButton, setShowScrollButton] = useState(false);
+  const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Update ref when chat changes
+  useEffect(() => {
+    currentChatRef.current = chat;
+    setIsTyping(false); // Reset typing status when switching chats
+  }, [chat]);
+
+  // Fetch messages when chat changes
+  useEffect(() => {
+    if (chat?.username) {
+      setIsLoadingMessages(true);
+      getMessagesApi(chat.username).then(msgs => {
+        setLocalMessages(msgs);
+        // Mark as seen when opening the chat
+        markSeenApi(chat.id).then(() => {
+          dispatch(clearUnreadCount(chat.id));
+        }).catch(err => console.error('Failed to mark as seen:', err));
+      }).catch(err => console.error('Failed to fetch messages:', err))
+      .finally(() => setIsLoadingMessages(false));
+    } else {
+      setLocalMessages([]);
+    }
+  }, [chat?.username, chat?.id, dispatch]);
+
+  // Subscribe to real-time messages
+  useEffect(() => {
+    return subscribeToMessages((err: Error | null, msg: any) => {
+      if (err) return;
+      
+      // If it's a 'messagesSeen' event
+      if (msg.type === 'messagesSeen') {
+        if (chat && msg.chatId === chat.id) {
+          setLocalMessages(prev => prev.map(m => ({ ...m, status: 'SEEN' as any })));
+        }
+        return;
+      }
+
+      // Handle typing status
+      if (msg.type === 'typing') {
+        const activeChatId = currentChatRef.current?.id;
+        console.log(`Typing event from ${msg.senderId}. Active chat: ${activeChatId}`);
+        if (String(msg.senderId) === String(activeChatId)) {
+          setIsTyping(true);
+        }
+        return;
+      } else if (msg.type === 'stopTyping') {
+        const activeChatId = currentChatRef.current?.id;
+        console.log(`Stop typing event from ${msg.senderId}. Active chat: ${activeChatId}`);
+        if (String(msg.senderId) === String(activeChatId)) {
+          setIsTyping(false);
+        }
+        return;
+      }
+
+      // Only append if the message belongs to the current active chat
+      if (chat && (msg.senderId === chat.id || msg.receiverId === chat.id || msg.senderId === me?.id?.toString() || msg.receiverId === me?.id?.toString())) {
+        setLocalMessages(prev => {
+          // If this is my own message coming from socket, replace the pending one
+          const isMine = String(msg.senderId) === String(me?.id);
+          
+          if (isMine) {
+            // Find a temp message with the same text/type
+            const tempIndex = prev.findIndex(m => 
+              m.id.toString().startsWith('temp-') && 
+              (m.text === msg.text || (m.messageType === msg.messageType && msg.messageType !== 'TEXT'))
+            );
+            
+            if (tempIndex !== -1) {
+              const newMsgs = [...prev];
+              newMsgs[tempIndex] = msg;
+              return newMsgs;
+            }
+          }
+
+          // Check for duplicates by ID
+          if (prev.find(m => m.id === msg.id)) return prev;
+          return [...prev, msg];
+        });
+
+        // If I received a message in the active chat, mark it as seen
+        if (msg.receiverId === me?.id?.toString() && msg.senderId === chat.id) {
+          markSeenApi(chat.id).then(() => {
+            dispatch(clearUnreadCount(chat.id));
+          }).catch(err => console.error('Failed to mark as seen:', err));
+        }
+      }
+    });
+  }, [chat, me?.id, dispatch]);
 
   const handleEmojiClick = (emojiData: any) => {
     setInputText(prev => prev + emojiData.emoji);
@@ -53,7 +159,73 @@ export function ChatWindow({ chat, messages, onStartAudioCall, onStartVideoCall 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      alert(`Selected file: ${file.name}`);
+      setSelectedFile(file);
+      if (file.type.startsWith('image/')) {
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          setFilePreview(reader.result as string);
+        };
+        reader.readAsDataURL(file);
+      } else {
+        setFilePreview(null); // No preview for non-images for now, or use a generic icon
+      }
+    }
+    // Clear the input value so the same file can be picked again
+    e.target.value = '';
+  };
+
+  const removeSelectedFile = () => {
+    setSelectedFile(null);
+    setFilePreview(null);
+  };
+
+  const handleSendMessage = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!inputText.trim() && !selectedFile) return;
+    if (!chat || !me) return;
+
+    const formData = new FormData();
+    formData.append('receiverId', chat.id);
+    formData.append('message', inputText);
+    
+    if (selectedFile) {
+      const type = selectedFile.type.split('/')[0].toUpperCase();
+      const mappedType = ['IMAGE', 'VIDEO', 'AUDIO'].includes(type) ? type : 'FILE';
+      formData.append('type', mappedType);
+      formData.append('file', selectedFile);
+      setIsUploading(true);
+    } else {
+      formData.append('type', 'TEXT');
+    }
+
+    try {
+      // Optimistic Update
+      const optimisticMsg: Message = {
+        id: 'temp-' + Date.now(),
+        senderId: me.id.toString(),
+        text: inputText,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        status: 'pending' as any,
+        messageType: selectedFile ? (['IMAGE', 'VIDEO', 'AUDIO'].includes(selectedFile.type.split('/')[0].toUpperCase()) ? selectedFile.type.split('/')[0].toUpperCase() as any : 'FILE') : 'TEXT',
+        fileUrl: filePreview || undefined,
+        fileName: selectedFile?.name,
+        fileSize: selectedFile ? `${(selectedFile.size / 1024 / 1024).toFixed(2)} MB` : undefined,
+      };
+
+      setLocalMessages(prev => [...prev, optimisticMsg]);
+      setInputText("");
+      removeSelectedFile();
+
+      const response = await sendMessageApi(formData);
+      
+      // Replace optimistic message with real one from server
+      setLocalMessages(prev => prev.map(m => m.id === optimisticMsg.id ? response : m));
+    } catch (err) {
+      console.error('Failed to send message:', err);
+      // Remove optimistic message on failure
+      setLocalMessages(prev => prev.filter(m => !m.id.toString().startsWith('temp-')));
+    } finally {
+      setIsUploading(false);
     }
   };
 
@@ -64,56 +236,27 @@ export function ChatWindow({ chat, messages, onStartAudioCall, onStartVideoCall 
         setIsEmojiPickerOpen(false);
       }
     };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const [isRecording, setIsRecording] = useState(false);
-  const [recordingTime, setRecordingTime] = useState(0);
-  const recordingIntervalRef = useRef<NodeJS.Timeout | null>(null);
-
-  const startRecording = () => {
-    setIsRecording(true);
-    setRecordingTime(0);
-    recordingIntervalRef.current = setInterval(() => {
-      setRecordingTime(prev => prev + 1);
-    }, 1000);
-  };
-
-  const stopRecording = () => {
-    if (recordingIntervalRef.current) {
-      clearInterval(recordingIntervalRef.current);
-    }
-    setIsRecording(false);
-    alert(`Voice message sent! Duration: ${formatRecordingTime(recordingTime)}`);
-    setRecordingTime(0);
-  };
-
-  const cancelRecording = () => {
-    if (recordingIntervalRef.current) {
-      clearInterval(recordingIntervalRef.current);
-    }
-    setIsRecording(false);
-    setRecordingTime(0);
-  };
-
-  const formatRecordingTime = (seconds: number) => {
-    const m = Math.floor(seconds / 60);
-    const s = seconds % 60;
-    return `${m}:${s.toString().padStart(2, '0')}`;
-  };
 
   const scrollToBottom = () => {
-    setTimeout(() => {
-      if (scrollRef.current) {
-        scrollRef.current.scrollIntoView({ behavior: 'smooth', block: 'end' });
-      }
-    }, 100);
+    if (scrollRef.current) {
+      scrollRef.current.scrollIntoView({ behavior: 'smooth', block: 'end' });
+      setShowScrollButton(false);
+    }
+  };
+
+  const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    const target = e.currentTarget;
+    const isAtBottom = target.scrollHeight - target.scrollTop <= target.clientHeight + 150;
+    setShowScrollButton(!isAtBottom);
   };
 
   useEffect(() => {
     scrollToBottom();
-  }, [messages, chat?.id]);
+  }, [localMessages, chat?.id, isTyping]);
 
   if (!chat) {
     return (
@@ -140,6 +283,16 @@ export function ChatWindow({ chat, messages, onStartAudioCall, onStartVideoCall 
       </div>
     );
   }
+
+  const ChatWindowSkeleton = () => (
+    <div className="flex flex-col gap-4">
+      {[1, 2, 3, 4, 5].map((i) => (
+        <div key={i} className={cn("flex w-full", i % 2 === 0 ? "justify-end" : "justify-start")}>
+          <Skeleton className={cn("h-16 w-64 rounded-lg", i % 2 === 0 ? "rounded-tr-none" : "rounded-tl-none")} />
+        </div>
+      ))}
+    </div>
+  );
 
   return (
     <div className="flex-1 h-full flex flex-col bg-[hsl(var(--chat-bg))] text-foreground overflow-hidden">
@@ -187,9 +340,13 @@ export function ChatWindow({ chat, messages, onStartAudioCall, onStartVideoCall 
               </Avatar>
               <div>
                 <h4 className="text-sm font-semibold">{chat.name}</h4>
-                <p className="text-[11px] text-muted-foreground">
-                  {chat.online ? "online" : "last seen today at 12:45"}
-                </p>
+                {isTyping ? (
+                  <p className="text-[11px] text-sky-400 font-semibold animate-pulse">typing...</p>
+                ) : (
+                  <p className="text-[11px] text-muted-foreground">
+                    {chat.online ? "online" : "last seen today at 12:45"}
+                  </p>
+                )}
               </div>
             </div>
             <div className="flex gap-5 text-muted-foreground items-center">
@@ -246,101 +403,180 @@ export function ChatWindow({ chat, messages, onStartAudioCall, onStartVideoCall 
       </Dialog>
 
       {/* Messages Area */}
-      <div className="flex-1 relative overflow-hidden">
+      <div className="flex-1 relative overflow-hidden flex flex-col">
         <div 
           className="absolute inset-0 opacity-[0.06] pointer-events-none bg-repeat"
           style={{ backgroundImage: `url('https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png')` }}
         />
-        <ScrollArea className="h-full px-2 py-4">
+        <div 
+          className="flex-1 overflow-y-auto px-4 py-4 scroll-smooth"
+          onScroll={handleScroll}
+        >
           <div className="flex flex-col w-full gap-1">
-            {messages.map(msg => (
-              <MessageBubble 
-                key={msg.id} 
-                message={msg} 
-                isMe={msg.senderId === 'me'} 
-              />
-            ))}
+            {isLoadingMessages ? (
+              <ChatWindowSkeleton />
+            ) : (
+              <>
+                {localMessages.map(msg => (
+                  <MessageBubble 
+                    key={msg.id} 
+                    message={msg} 
+                    isMe={String(msg.senderId) === String(me?.id)} 
+                  />
+                ))}
+              </>
+            )}
+            
+            {isTyping && (
+              <div className="flex justify-start mb-4 animate-in fade-in slide-in-from-left-4 duration-500">
+                <div className="bg-[hsl(var(--bubble-other))] px-5 py-4 rounded-2xl rounded-tl-none shadow-md flex items-center gap-1.5 border border-border/50">
+                  <span className="w-2 h-2 bg-primary/60 rounded-full animate-typing-dot" style={{ animationDelay: '0ms' }}></span>
+                  <span className="w-2 h-2 bg-primary/60 rounded-full animate-typing-dot" style={{ animationDelay: '200ms' }}></span>
+                  <span className="w-2 h-2 bg-primary/60 rounded-full animate-typing-dot" style={{ animationDelay: '400ms' }}></span>
+                </div>
+              </div>
+            )}
+
+            {isUploading && (
+              <div className="flex justify-end mb-2">
+                <div className="bg-primary/20 text-xs px-3 py-1 rounded-full animate-pulse">
+                  Uploading file...
+                </div>
+              </div>
+            )}
             <div ref={scrollRef} />
           </div>
-        </ScrollArea>
+        </div>
+
+        {/* Floating Scroll to Bottom Button */}
+        {showScrollButton && (
+          <Button
+            variant="secondary"
+            size="icon"
+            onClick={scrollToBottom}
+            className="absolute bottom-6 right-8 h-11 w-11 rounded-full shadow-2xl border border-primary/20 bg-background/90 backdrop-blur-md text-primary animate-in zoom-in fade-in duration-300 hover:bg-background z-50 transition-all active:scale-95"
+          >
+            <FontAwesomeIcon icon={faChevronDown} className="h-5 w-5" />
+          </Button>
+        )}
       </div>
 
       {/* Input Area */}
-      <div className="h-[62px] bg-[hsl(var(--chat-header-bg))] px-4 flex items-center gap-4 shrink-0 relative">
-        {isRecording ? (
-          <div className="flex-1 flex items-center justify-between bg-background/50 rounded-lg h-10 px-4 animate-in fade-in slide-in-from-bottom-2 duration-300">
-            <div className="flex items-center gap-3">
-              <div className="w-2 h-2 rounded-full bg-destructive animate-pulse" />
-              <span className="text-sm font-medium text-foreground">Recording {formatRecordingTime(recordingTime)}</span>
-            </div>
-            <div className="flex items-center gap-4">
-              <FontAwesomeIcon 
-                icon={faTrash} 
-                className="h-5 w-5 text-muted-foreground cursor-pointer hover:text-destructive transition-colors"
-                onClick={cancelRecording}
-              />
-              <div 
-                className="bg-primary h-8 w-8 rounded-full flex items-center justify-center text-primary-foreground cursor-pointer hover:scale-105 transition-transform"
-                onClick={stopRecording}
-              >
-                <FontAwesomeIcon icon={faPaperPlane} className="h-4 w-4" />
-              </div>
-            </div>
-          </div>
-        ) : (
-          <>
-            <div className="flex gap-3 text-muted-foreground items-center">
-              <div className="relative" ref={pickerRef}>
-                <FontAwesomeIcon 
-                  icon={faFaceSmile} 
-                  className={`h-6 w-6 cursor-pointer hover:text-foreground transition-colors ${isEmojiPickerOpen ? 'text-primary' : ''}`} 
-                  onClick={() => setIsEmojiPickerOpen(!isEmojiPickerOpen)}
-                />
-                {isEmojiPickerOpen && (
-                  <div className="absolute bottom-12 left-0 z-50 animate-in fade-in zoom-in-95 duration-200">
-                    <EmojiPicker 
-                      onEmojiClick={handleEmojiClick}
-                      theme={Theme.DARK}
-                      width={320}
-                      height={400}
-                      lazyLoadEmojis={true}
-                    />
+      <div className="bg-[hsl(var(--chat-header-bg))] border-t relative">
+        {/* File Preview Card (WhatsApp style) */}
+        {selectedFile && (
+          <div className="px-4 py-3 bg-background/80 backdrop-blur-md border-b animate-in slide-in-from-bottom-2 duration-300">
+            <div className="flex items-center justify-between p-2 bg-accent/30 rounded-lg">
+              <div className="flex items-center gap-4 min-w-0">
+                {filePreview ? (
+                  <div className="h-16 w-16 rounded overflow-hidden border">
+                    <img src={filePreview} alt="Preview" className="h-full w-full object-cover" />
+                  </div>
+                ) : (
+                  <div className="h-16 w-16 rounded bg-primary/20 flex items-center justify-center border text-primary">
+                    <FontAwesomeIcon icon={faPaperclip} className="h-6 w-6" />
                   </div>
                 )}
+                <div className="min-w-0">
+                  <p className="text-sm font-medium truncate">{selectedFile.name}</p>
+                  <p className="text-xs text-muted-foreground">{(selectedFile.size / 1024 / 1024).toFixed(2)} MB</p>
+                </div>
               </div>
-              
-              <input 
-                type="file" 
-                ref={fileInputRef} 
-                className="hidden" 
-                onChange={handleFileSelect}
-              />
-              <FontAwesomeIcon 
-                icon={faPaperclip} 
-                className="h-6 w-6 cursor-pointer hover:text-foreground transition-colors rotate-[45deg]" 
-                onClick={() => handleFileClick('all')}
-              />
+              <Button variant="ghost" size="icon" onClick={removeSelectedFile} className="h-8 w-8 text-muted-foreground hover:text-destructive">
+                <FontAwesomeIcon icon={faXmark} />
+              </Button>
             </div>
-            <Input 
-              value={inputText}
-              onChange={(e) => setInputText(e.target.value)}
-              placeholder="Type a message"
-              className="flex-1 border-none bg-[hsl(var(--input-bg))] shadow-none focus-visible:ring-0 text-foreground h-10 placeholder:text-muted-foreground rounded-lg"
-            />
-            <div className="text-muted-foreground flex items-center justify-center w-10">
-              {inputText ? (
-                 <FontAwesomeIcon icon={faPaperPlane} className="h-6 w-6 text-primary cursor-pointer hover:scale-110 transition-transform" />
-              ) : (
-                <FontAwesomeIcon 
-                  icon={faMicrophone} 
-                  className="h-6 w-6 cursor-pointer hover:text-primary transition-colors" 
-                  onClick={startRecording}
-                />
+          </div>
+        )}
+
+        <div className="p-3 flex items-center gap-2">
+          <div className="flex items-center">
+            <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-primary transition-colors">
+              <FontAwesomeIcon icon={faPaperclip} className="h-5 w-5" onClick={() => handleFileClick('file')} />
+            </Button>
+            
+            <div className="relative">
+              <Button 
+                variant="ghost" 
+                size="icon" 
+                className={cn("text-muted-foreground hover:text-primary transition-colors", isEmojiPickerOpen && "text-primary")}
+                onClick={() => setIsEmojiPickerOpen(!isEmojiPickerOpen)}
+              >
+                <FontAwesomeIcon icon={faFaceSmile} className="h-5 w-5" />
+              </Button>
+              
+              {isEmojiPickerOpen && (
+                <div className="absolute bottom-full left-0 mb-4 z-50" ref={pickerRef}>
+                  <EmojiPicker 
+                    onEmojiClick={handleEmojiClick}
+                    theme={Theme.AUTO}
+                    width={320}
+                    height={400}
+                  />
+                </div>
               )}
             </div>
-          </>
-        )}
+          </div>
+
+          <form onSubmit={handleSendMessage} className="flex-1 flex items-center gap-2">
+            <Input 
+              placeholder="Type a message..."
+              value={inputText}
+              onChange={(e) => {
+                setInputText(e.target.value);
+                
+                // Typing indicator logic
+                if (chat && me) {
+                  const socket = getSocket();
+                  if (socket) {
+                    const sid = Number(me.id);
+                    const rid = Number(chat.id);
+                    console.log(`Sending typing event: ${sid} -> ${rid}`);
+                    socket.emit('typing', { senderId: sid, receiverId: rid });
+                    
+                    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+                    typingTimeoutRef.current = setTimeout(() => {
+                      console.log(`Sending stopTyping event: ${sid} -> ${rid}`);
+                      socket.emit('stopTyping', { senderId: sid, receiverId: rid });
+                    }, 3000);
+                  }
+                }
+              }}
+              onFocus={() => {
+                if (chat) {
+                  markSeenApi(chat.id).then(() => {
+                    dispatch(clearUnreadCount(chat.id));
+                  }).catch(err => console.error('Failed to mark as seen:', err));
+                }
+              }}
+              className="flex-1 bg-background border-none focus-visible:ring-1 focus-visible:ring-primary/20 h-10 px-4 rounded-full"
+            />
+            
+            <Button 
+              type="submit" 
+              size="icon" 
+              disabled={!inputText.trim() && !selectedFile}
+              className={cn(
+                "rounded-full h-10 w-10 transition-all duration-300",
+                (inputText.trim() || selectedFile) ? "bg-primary text-primary-foreground scale-100" : "bg-muted text-muted-foreground scale-90"
+              )}
+            >
+              <FontAwesomeIcon icon={faPaperPlane} className="h-4 w-4" />
+            </Button>
+          </form>
+
+          <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-primary transition-colors">
+            <FontAwesomeIcon icon={faMicrophone} className="h-5 w-5" />
+          </Button>
+        </div>
       </div>
+      
+      <input 
+        type="file" 
+        ref={fileInputRef} 
+        className="hidden" 
+        onChange={handleFileSelect}
+      />
     </div>
   );
 }

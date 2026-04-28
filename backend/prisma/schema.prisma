@@ -62,6 +62,9 @@ model Message {
   receiverId     Int
   chatRoomId     Int
   message        String?     @db.Text
+  fileUrl        String?     @db.Text
+  fileName       String?
+  fileSize       String?
   messageType    MessageType @default(TEXT)
   status         MessageStatus @default(UNSEEN)
   

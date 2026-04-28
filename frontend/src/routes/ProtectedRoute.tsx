@@ -20,11 +20,9 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children }) => {
 
 export const PublicRoute: React.FC<ProtectedRouteProps> = ({ children }) => {
   const { isAuthenticated } = useSelector((state: RootState) => state.auth);
-  const location = useLocation();
 
   if (isAuthenticated) {
-    const from = (location.state as any)?.from?.pathname || "/";
-    return <Navigate to={from} replace />;
+    return <Navigate to="/" replace />;
   }
 
   return <>{children}</>;

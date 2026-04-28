@@ -9,10 +9,21 @@ export interface MessageAttachment {
 export interface Message {
   id: string;
   senderId: string;
-  text: string;
+  receiverId?: string;
+  text?: string;
+  fileUrl?: string;
+  fileName?: string;
+  fileSize?: string;
   timestamp: string;
-  status: 'sent' | 'delivered' | 'read';
-  attachment?: MessageAttachment;
+  status: 'sent' | 'delivered' | 'read' | 'UNSEEN' | 'SEEN' | 'pending';
+  messageType?: 'TEXT' | 'IMAGE' | 'VIDEO' | 'AUDIO' | 'FILE';
+  attachment?: {
+    type: 'image' | 'video' | 'file' | 'audio';
+    url: string;
+    thumbnail?: string;
+    name?: string;
+    size?: string;
+  };
 }
 
 export interface Chat {

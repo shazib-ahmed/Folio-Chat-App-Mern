@@ -3,10 +3,13 @@ import { ChatService } from './chat.service';
 import { ChatController } from './chat.controller';
 import { DatabaseModule } from 'src/database/database.module';
 
+import { ChatGateway } from './gateways/chat.gateway';
+import { CloudinaryModule } from '../cloudinary/cloudinary.module';
+
 @Module({
-  imports: [DatabaseModule],
+  imports: [DatabaseModule, CloudinaryModule],
   controllers: [ChatController],
-  providers: [ChatService],
-  exports: [ChatService],
+  providers: [ChatService, ChatGateway],
+  exports: [ChatService, ChatGateway],
 })
 export class ChatModule {}

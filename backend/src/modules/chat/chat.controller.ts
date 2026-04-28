@@ -1,7 +1,9 @@
-import { Controller, Get, UseGuards, Req, Query, Param } from '@nestjs/common';
+import { Controller, Get, UseGuards, Req, Query, Param, Post, Body, UseInterceptors, UploadedFile } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { ChatService } from './chat.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import * as express from 'express';
+import { MessageType } from '@prisma/client';
 
 @Controller('chat')
 @UseGuards(JwtAuthGuard)
@@ -23,5 +25,32 @@ export class ChatController {
   @Get('user/:username')
   async getUserByUsername(@Param('username') username: string) {
     return this.chatService.getUserByUsername(username);
+  }
+
+  @Post('send')
+  @UseInterceptors(FileInterceptor('file', {
+    limits: { fileSize: 100 * 1024 * 1024 } // 100MB
+  }))
+  async sendMessage(
+    @Req() req: express.Request,
+    @Body('receiverId') receiverId: string,
+    @Body('message') message: string,
+    @Body('type') type: MessageType,
+    @UploadedFile() file?: Express.Multer.File,
+  ) {
+    const user = req.user as any;
+    return this.chatService.sendMessage(user.userId, Number(receiverId), message, type, file);
+  }
+
+  @Get('messages/:username')
+  async getMessages(@Req() req: express.Request, @Param('username') username: string) {
+    const user = req.user as any;
+    return this.chatService.getMessages(user.userId, username);
+  }
+
+  @Post('mark-seen/:chatId')
+  async markAsSeen(@Req() req: express.Request, @Param('chatId') chatId: string) {
+    const user = req.user as any;
+    return this.chatService.markAsSeen(user.userId, Number(chatId));
   }
 }

@@ -181,7 +181,7 @@ export function ChatSidebar({ chats, activeChatId }: ChatSidebarProps) {
                     <div
                       key={result.id}
                       onClick={() => handleChatSelect(result.username, {
-                        id: result.username,
+                        id: result.id.toString(),
                         name: result.name || result.username,
                         username: result.username,
                         avatar: result.avatar,
@@ -214,8 +214,8 @@ export function ChatSidebar({ chats, activeChatId }: ChatSidebarProps) {
                 <ChatListItem 
                   key={chat.id} 
                   chat={chat} 
-                  isActive={activeChatId === chat.id}
-                  onClick={() => handleChatSelect(chat.id)}
+                  isActive={activeChatId === chat.username}
+                  onClick={() => handleChatSelect(chat.username)}
                 />
               ))
             )}

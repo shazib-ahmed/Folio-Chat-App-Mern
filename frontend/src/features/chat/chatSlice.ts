@@ -4,12 +4,14 @@ import { getChatListApi } from './chatService';
 
 interface ChatState {
   chats: Chat[];
+  typingUsers: { [chatId: string]: boolean };
   isLoading: boolean;
   error: string | null;
 }
 
 const initialState: ChatState = {
   chats: [],
+  typingUsers: {},
   isLoading: false,
   error: null,
 };
@@ -38,12 +40,37 @@ const chatSlice = createSlice({
         state.chats = [action.payload, ...state.chats];
       }
     },
-    updateChatLastMessage: (state, action: PayloadAction<{ chatId: string; message: string; time: string }>) => {
-      const chat = state.chats.find(c => c.id === action.payload.chatId);
-      if (chat) {
-        chat.lastMessage = action.payload.message;
-        chat.lastMessageTime = action.payload.time;
+    updateChatLastMessage: (state, action: PayloadAction<{ 
+      chatId: string; 
+      message: string; 
+      time: string;
+      isMine?: boolean;
+    }>) => {
+      const { chatId, message, time, isMine } = action.payload;
+      const chatIndex = state.chats.findIndex(c => c.id === chatId);
+      if (chatIndex !== -1) {
+        const chat = { ...state.chats[chatIndex] };
+        chat.lastMessage = isMine ? `You: ${message}` : message;
+        chat.lastMessageTime = time;
+        
+        // Increment unread count if it's NOT my own message
+        if (!isMine) {
+          chat.unreadCount = (chat.unreadCount || 0) + 1;
+        }
+
+        // Remove from current position and move to top
+        state.chats.splice(chatIndex, 1);
+        state.chats = [chat, ...state.chats];
       }
+    },
+    clearUnreadCount: (state, action: PayloadAction<string>) => {
+      const chat = state.chats.find(c => c.id === action.payload);
+      if (chat) {
+        chat.unreadCount = 0;
+      }
+    },
+    setTypingStatus: (state, action: PayloadAction<{ chatId: string; isTyping: boolean }>) => {
+      state.typingUsers[action.payload.chatId] = action.payload.isTyping;
     }
   },
   extraReducers: (builder) => {
@@ -63,5 +90,5 @@ const chatSlice = createSlice({
   },
 });
 
-export const { setChats, selectChat, updateChatLastMessage } = chatSlice.actions;
+export const { setChats, selectChat, updateChatLastMessage, clearUnreadCount, setTypingStatus } = chatSlice.actions;
 export default chatSlice.reducer;
