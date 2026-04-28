@@ -93,6 +93,36 @@ const VoiceMessage = React.memo(({ url, isMe }: { url: string; isMe?: boolean })
 
 export const MessageBubble = React.memo(({ message, isMe }: MessageBubbleProps) => {
   const [isImageModalOpen, setIsImageModalOpen] = useState(false);
+
+  const handleDownload = async (e: React.MouseEvent, url: string, fileName: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    // Cloudinary force download trick: insert 'fl_attachment' after 'upload/'
+    let downloadUrl = url;
+    if (url.includes('cloudinary.com') && url.includes('/upload/')) {
+      downloadUrl = url.replace('/upload/', '/upload/fl_attachment/');
+    }
+
+    try {
+      const response = await fetch(url);
+      if (!response.ok) throw new Error('Download failed');
+      
+      const blob = await response.blob();
+      const blobUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = fileName || 'file';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(blobUrl);
+    } catch (err) {
+      console.error("Download error:", err);
+      // Fallback: Open modified Cloudinary URL in new tab (which forces download)
+      window.open(downloadUrl, '_blank');
+    }
+  };
   return (
     <div className={cn(
       "flex w-full mb-2",
@@ -169,11 +199,9 @@ export const MessageBubble = React.memo(({ message, isMe }: MessageBubbleProps) 
 
         {message.messageType === 'FILE' && (
           <div className="mb-2 min-w-[240px]">
-            <a 
-              href={message.fileUrl || message.text} 
-              target="_blank" 
-              rel="noopener noreferrer"
-              className="flex items-center gap-3 p-2 bg-black/5 dark:bg-white/5 rounded border border-black/10 dark:border-white/10 group hover:bg-black/10 dark:hover:bg-white/10 transition-colors"
+            <div 
+              onClick={(e) => handleDownload(e, (message.fileUrl || message.text) || '', message.fileName || 'file')}
+              className="flex items-center gap-3 p-2 bg-black/5 dark:bg-white/5 rounded border border-black/10 dark:border-white/10 group hover:bg-black/10 dark:hover:bg-white/10 transition-colors cursor-pointer"
             >
               <div className="w-9 h-9 bg-primary/20 rounded flex items-center justify-center shrink-0">
                 <FontAwesomeIcon icon={faFileLines} className="text-primary text-lg" />
@@ -183,7 +211,7 @@ export const MessageBubble = React.memo(({ message, isMe }: MessageBubbleProps) 
                 <p className="text-[9px] opacity-60">{message.fileSize || 'Click to view/download'}</p>
               </div>
               <FontAwesomeIcon icon={faDownload} className="text-[10px] opacity-40 group-hover:opacity-100 transition-opacity" />
-            </a>
+            </div>
           </div>
         )}
 
