@@ -404,7 +404,7 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
                   <p className="text-[11px] text-sky-400 font-semibold animate-pulse">typing...</p>
                 ) : (
                   <p className="text-[11px] text-muted-foreground">
-                    {chat.online ? "online" : "last seen today at 12:45"}
+                    {chat.online ? "online" : (chat.lastSeen ? `last seen ${chat.lastSeen}` : "offline")}
                   </p>
                 )}
               </div>

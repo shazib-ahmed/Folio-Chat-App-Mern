@@ -71,6 +71,15 @@ const chatSlice = createSlice({
     },
     setTypingStatus: (state, action: PayloadAction<{ chatId: string; isTyping: boolean }>) => {
       state.typingUsers[action.payload.chatId] = action.payload.isTyping;
+    },
+    setUserStatus: (state, action: PayloadAction<{ userId: string; isOnline: boolean; lastSeen?: string }>) => {
+      const chat = state.chats.find(c => c.id === action.payload.userId);
+      if (chat) {
+        chat.online = action.payload.isOnline;
+        if (action.payload.lastSeen) {
+          chat.lastSeen = action.payload.lastSeen;
+        }
+      }
     }
   },
   extraReducers: (builder) => {
@@ -90,5 +99,5 @@ const chatSlice = createSlice({
   },
 });
 
-export const { setChats, selectChat, updateChatLastMessage, clearUnreadCount, setTypingStatus } = chatSlice.actions;
+export const { setChats, selectChat, updateChatLastMessage, clearUnreadCount, setTypingStatus, setUserStatus } = chatSlice.actions;
 export default chatSlice.reducer;

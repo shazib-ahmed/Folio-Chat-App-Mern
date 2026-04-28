@@ -35,4 +35,5 @@ export interface Chat {
   lastMessageTime?: string;
   unreadCount?: number;
   online?: boolean;
+  lastSeen?: string;
 }

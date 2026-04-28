@@ -17,8 +17,8 @@ import { Card, CardContent } from '@/shared/ui/card';
 import { ProtectedRoute, PublicRoute } from '@/routes/ProtectedRoute';
 import { useDispatch, useSelector } from 'react-redux';
 import { RootState, AppDispatch } from '@/app/store';
-import { initiateSocketConnection, disconnectSocket, subscribeToMessages } from '@/shared/lib/socket';
-import { fetchChatList, updateChatLastMessage, setTypingStatus } from '@/features/chat/chatSlice';
+import { initiateSocketConnection, disconnectSocket, subscribeToMessages, getSocket } from '@/shared/lib/socket';
+import { fetchChatList, updateChatLastMessage, setTypingStatus, setUserStatus } from '@/features/chat/chatSlice';
 import { getUserByUsernameApi } from '@/features/chat/chatService';
 
 function ChatLayout() {
@@ -78,9 +78,22 @@ function ChatLayout() {
       }
     });
 
-    return () => {
-      if (unsubscribe) unsubscribe();
-    };
+      // Handle User Status (Online/Offline)
+      const socket = getSocket();
+      if (socket) {
+        socket.on('userStatus', (data: { userId: number; isOnline: boolean; lastSeen?: string }) => {
+          dispatch(setUserStatus({ 
+            userId: String(data.userId), 
+            isOnline: data.isOnline,
+            lastSeen: data.lastSeen 
+          }));
+        });
+      }
+
+      return () => {
+        if (unsubscribe) unsubscribe();
+        if (socket) socket.off('userStatus');
+      };
   }, [user?.id, dispatch]);
 
   // Find selected user based on chatId (username) from URL

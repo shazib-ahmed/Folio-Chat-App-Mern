@@ -171,6 +171,7 @@ export class ChatService {
             lastMessageTime: this.formatTime(msg.createdAt),
             online: otherUser.isOnline,
             unreadCount: unreadCount,
+            lastSeen: otherUser.lastSeen ? this.formatTime(otherUser.lastSeen) : null,
           });
         }
       }
@@ -204,6 +205,7 @@ export class ChatService {
           username: true,
           avatar: true,
           isOnline: true,
+          lastSeen: true,
         }
       });
     } catch (error) {
@@ -221,6 +223,7 @@ export class ChatService {
         username: true,
         avatar: true,
         isOnline: true,
+        lastSeen: true,
       }
     });
   }

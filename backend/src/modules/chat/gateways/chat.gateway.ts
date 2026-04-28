@@ -8,6 +8,7 @@ import {
   ConnectedSocket,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
+import { PrismaService } from 'src/database/prisma.service';
 
 @WebSocketGateway({
   cors: {
@@ -18,26 +19,71 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
   server: Server;
 
+  constructor(private prisma: PrismaService) {}
+
   // Map to track connected users: userId -> socketId
   private connectedUsers: Map<number, string> = new Map();
 
-  handleConnection(client: Socket) {
+  async handleConnection(client: Socket) {
     const userId = client.handshake.query.userId;
-    if (userId) {
-      this.connectedUsers.set(Number(userId), client.id);
+    if (userId && !isNaN(Number(userId))) {
+      const uId = Number(userId);
+      this.connectedUsers.set(uId, client.id);
+      
+      // Update database status
+      await this.prisma.user.update({
+        where: { id: uId },
+        data: { isOnline: true }
+      });
+
+      // Broadcast status change
+      this.server.emit('userStatus', { userId: uId, isOnline: true });
+      
       console.log(`User connected: ${userId} with socketId: ${client.id}`);
     }
   }
 
-  handleDisconnect(client: Socket) {
+  async handleDisconnect(client: Socket) {
     // Find and remove the user from the map
     for (const [userId, socketId] of this.connectedUsers.entries()) {
       if (socketId === client.id) {
         this.connectedUsers.delete(userId);
+        
+        // Update database status
+        const lastSeen = new Date();
+        await this.prisma.user.update({
+          where: { id: userId },
+          data: { isOnline: false, lastSeen }
+        });
+
+        // Broadcast status change
+        this.server.emit('userStatus', { 
+          userId, 
+          isOnline: false, 
+          lastSeen: this.formatTime(lastSeen) 
+        });
+        
         console.log(`User disconnected: ${userId}`);
         break;
       }
     }
+  }
+
+  private formatTime(date: Date) {
+    const now = new Date();
+    const isToday = date.toDateString() === now.toDateString();
+    
+    if (isToday) {
+      return `today at ${date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+    }
+    
+    const yesterday = new Date();
+    yesterday.setDate(now.getDate() - 1);
+    if (date.toDateString() === yesterday.toDateString()) {
+      return `yesterday at ${date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+    }
+
+    return date.toLocaleDateString();
   }
 
   @SubscribeMessage('join')
