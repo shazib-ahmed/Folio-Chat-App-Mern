@@ -578,6 +578,20 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
     prevMessagesLengthRef.current = localMessages.length;
   }, [localMessages, chat?.id, isFetchingMore]);
 
+  // Auto-scroll for typing indicator
+  useEffect(() => {
+    if (isTyping) {
+      const container = messagesContainerRef.current;
+      if (container) {
+        // If user is near bottom, scroll to show the indicator
+        const isNearBottom = container.scrollHeight - container.scrollTop <= container.clientHeight + 300;
+        if (isNearBottom) {
+          scrollToBottom('smooth');
+        }
+      }
+    }
+  }, [isTyping]);
+
   if (!chat) {
     return (
       <div className="flex-1 h-full bg-[hsl(var(--chat-bg))] flex flex-col items-center justify-center text-muted-foreground relative">
