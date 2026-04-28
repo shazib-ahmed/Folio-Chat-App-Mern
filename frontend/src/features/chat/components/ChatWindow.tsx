@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
+import EmojiPicker, { Theme } from 'emoji-picker-react';
 import { Avatar, AvatarFallback, AvatarImage } from "@/shared/ui/avatar";
 import { ScrollArea } from "@/shared/ui/scroll-area";
 import { Input } from "@/shared/ui/input";
 import { Button } from "@/shared/ui/button";
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faEllipsisVertical, faSearch, faFaceSmile, faPaperclip, faMicrophone, faPaperPlane, faImage, faFile, faCamera, faUser, faArrowLeft, faPhone, faVideo } from '@fortawesome/free-solid-svg-icons';
+import { faBan, faSearch, faFaceSmile, faPaperclip, faMicrophone, faPaperPlane, faImage, faFile, faCamera, faUser, faArrowLeft, faPhone, faVideo, faXmark, faTrash } from '@fortawesome/free-solid-svg-icons';
 import { MessageBubble } from "./MessageBubble";
 import { Chat, Message } from "../types";
 import { useNavigate } from "react-router-dom";
@@ -14,6 +15,14 @@ import {
   DropdownMenuItem, 
   DropdownMenuTrigger 
 } from "@/shared/ui/dropdown-menu";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/shared/ui/dialog";
 
 interface ChatWindowProps {
   chat?: Chat;
@@ -24,8 +33,80 @@ interface ChatWindowProps {
 
 export function ChatWindow({ chat, messages, onStartAudioCall, onStartVideoCall }: ChatWindowProps) {
   const [inputText, setInputText] = useState("");
+  const [isSearching, setIsSearching] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [isEmojiPickerOpen, setIsEmojiPickerOpen] = useState(false);
+  const [isBlockModalOpen, setIsBlockModalOpen] = useState(false);
   const navigate = useNavigate();
   const scrollRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const pickerRef = useRef<HTMLDivElement>(null);
+
+  const handleEmojiClick = (emojiData: any) => {
+    setInputText(prev => prev + emojiData.emoji);
+  };
+
+  const handleFileClick = (type: string) => {
+    if (fileInputRef.current) {
+      if (type === 'image') fileInputRef.current.accept = "image/*";
+      else if (type === 'video') fileInputRef.current.accept = "video/*";
+      else fileInputRef.current.accept = "*/*";
+      fileInputRef.current.click();
+    }
+  };
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      alert(`Selected file: ${file.name}`);
+    }
+  };
+
+  // Close emoji picker when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (pickerRef.current && !pickerRef.current.contains(event.target as Node)) {
+        setIsEmojiPickerOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingTime, setRecordingTime] = useState(0);
+  const recordingIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  const startRecording = () => {
+    setIsRecording(true);
+    setRecordingTime(0);
+    recordingIntervalRef.current = setInterval(() => {
+      setRecordingTime(prev => prev + 1);
+    }, 1000);
+  };
+
+  const stopRecording = () => {
+    if (recordingIntervalRef.current) {
+      clearInterval(recordingIntervalRef.current);
+    }
+    setIsRecording(false);
+    alert(`Voice message sent! Duration: ${formatRecordingTime(recordingTime)}`);
+    setRecordingTime(0);
+  };
+
+  const cancelRecording = () => {
+    if (recordingIntervalRef.current) {
+      clearInterval(recordingIntervalRef.current);
+    }
+    setIsRecording(false);
+    setRecordingTime(0);
+  };
+
+  const formatRecordingTime = (seconds: number) => {
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return `${m}:${s.toString().padStart(2, '0')}`;
+  };
 
   const scrollToBottom = () => {
     setTimeout(() => {
@@ -68,42 +149,106 @@ export function ChatWindow({ chat, messages, onStartAudioCall, onStartVideoCall 
   return (
     <div className="flex-1 h-full flex flex-col bg-[hsl(var(--chat-bg))] text-foreground overflow-hidden">
       {/* Header */}
-      <div className="h-[60px] bg-[hsl(var(--chat-header-bg))] px-4 flex items-center justify-between shrink-0 border-b">
-        <div className="flex items-center gap-3">
-          <Button 
-            variant="ghost" 
-            size="icon" 
-            className="lg:hidden text-muted-foreground hover:text-foreground -ml-2"
-            onClick={() => navigate('/')}
-          >
-            <FontAwesomeIcon icon={faArrowLeft} className="h-5 w-5" />
-          </Button>
-          <Avatar className="h-10 w-10">
-            <AvatarImage src={chat.avatar} />
-            <AvatarFallback>{chat.name.substring(0, 2).toUpperCase()}</AvatarFallback>
-          </Avatar>
-          <div>
-            <h4 className="text-sm font-semibold">{chat.name}</h4>
-            <p className="text-[11px] text-muted-foreground">
-              {chat.online ? "online" : "last seen today at 12:45"}
-            </p>
+      <div className="h-[60px] bg-[hsl(var(--chat-header-bg))] px-4 flex items-center justify-between shrink-0 border-b relative">
+        {isSearching ? (
+          <div className="flex-1 flex items-center gap-4 animate-in fade-in slide-in-from-right-4 duration-300">
+            <FontAwesomeIcon 
+              icon={faArrowLeft} 
+              className="text-muted-foreground cursor-pointer hover:text-foreground h-4 w-4"
+              onClick={() => {
+                setIsSearching(false);
+                setSearchQuery("");
+              }}
+            />
+            <div className="flex-1 relative">
+              <Input 
+                autoFocus
+                placeholder="Search messages..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full bg-transparent border-none focus-visible:ring-0 h-10 px-0 text-sm"
+              />
+            </div>
+            <FontAwesomeIcon 
+              icon={faXmark} 
+              className="text-muted-foreground cursor-pointer hover:text-foreground h-4 w-4"
+              onClick={() => setSearchQuery("")}
+            />
           </div>
-        </div>
-        <div className="flex gap-5 text-muted-foreground items-center">
-          <FontAwesomeIcon 
-            icon={faVideo} 
-            className="h-4 w-4 cursor-pointer hover:text-foreground" 
-            onClick={() => chat && onStartVideoCall?.(chat)}
-          />
-          <FontAwesomeIcon 
-            icon={faPhone} 
-            className="h-4 w-4 cursor-pointer hover:text-foreground" 
-            onClick={() => chat && onStartAudioCall?.(chat)}
-          />
-          <FontAwesomeIcon icon={faSearch} className="h-4 w-4 cursor-pointer hover:text-foreground" />
-          <FontAwesomeIcon icon={faEllipsisVertical} className="h-4 w-4 cursor-pointer hover:text-foreground" />
-        </div>
+        ) : (
+          <>
+            <div className="flex items-center gap-3">
+              <Button 
+                variant="ghost" 
+                size="icon" 
+                className="lg:hidden text-muted-foreground hover:text-foreground -ml-2"
+                onClick={() => navigate('/')}
+              >
+                <FontAwesomeIcon icon={faArrowLeft} className="h-5 w-5" />
+              </Button>
+              <Avatar className="h-10 w-10">
+                <AvatarImage src={chat.avatar} />
+                <AvatarFallback>{chat.name.substring(0, 2).toUpperCase()}</AvatarFallback>
+              </Avatar>
+              <div>
+                <h4 className="text-sm font-semibold">{chat.name}</h4>
+                <p className="text-[11px] text-muted-foreground">
+                  {chat.online ? "online" : "last seen today at 12:45"}
+                </p>
+              </div>
+            </div>
+            <div className="flex gap-5 text-muted-foreground items-center">
+              <FontAwesomeIcon 
+                icon={faVideo} 
+                className="h-4 w-4 cursor-pointer hover:text-foreground" 
+                onClick={() => chat && onStartVideoCall?.(chat)}
+              />
+              <FontAwesomeIcon 
+                icon={faPhone} 
+                className="h-4 w-4 cursor-pointer hover:text-foreground" 
+                onClick={() => chat && onStartAudioCall?.(chat)}
+              />
+              <FontAwesomeIcon 
+                icon={faSearch} 
+                className="h-4 w-4 cursor-pointer hover:text-foreground" 
+                onClick={() => setIsSearching(true)}
+              />
+              <FontAwesomeIcon 
+                icon={faBan} 
+                className="h-4 w-4 cursor-pointer hover:text-destructive transition-colors" 
+                title="Block User"
+                onClick={() => setIsBlockModalOpen(true)}
+              />
+            </div>
+          </>
+        )}
       </div>
+
+      <Dialog open={isBlockModalOpen} onOpenChange={setIsBlockModalOpen}>
+        <DialogContent className="max-w-[400px]">
+          <DialogHeader>
+            <DialogTitle>Block {chat.name}?</DialogTitle>
+            <DialogDescription>
+              Blocked contacts will no longer be able to call you or send you messages. This action can be undone later.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="flex gap-2 sm:gap-0">
+            <Button variant="ghost" onClick={() => setIsBlockModalOpen(false)} className="flex-1">
+              Cancel
+            </Button>
+            <Button 
+              variant="destructive" 
+              onClick={() => {
+                alert(`${chat.name} has been blocked.`);
+                setIsBlockModalOpen(false);
+              }}
+              className="flex-1"
+            >
+              Block User
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Messages Area */}
       <div className="flex-1 relative overflow-hidden">
@@ -126,55 +271,80 @@ export function ChatWindow({ chat, messages, onStartAudioCall, onStartVideoCall 
       </div>
 
       {/* Input Area */}
-      <div className="h-[62px] bg-[hsl(var(--chat-header-bg))] px-4 flex items-center gap-4 shrink-0">
-        <div className="flex gap-3 text-muted-foreground items-center">
-          <FontAwesomeIcon icon={faFaceSmile} className="h-6 w-6 cursor-pointer hover:text-foreground transition-colors" />
-          
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <FontAwesomeIcon icon={faPaperclip} className="h-6 w-6 cursor-pointer hover:text-foreground transition-colors rotate-[45deg]" />
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" side="top" className="mb-4 w-48 p-2 rounded-xl bg-popover border-border/40 shadow-xl">
-              <DropdownMenuItem className="flex items-center gap-3 p-2 cursor-pointer rounded-lg hover:bg-accent transition-colors">
-                <div className="w-8 h-8 rounded-full bg-blue-500 flex items-center justify-center text-white">
-                  <FontAwesomeIcon icon={faFile} />
-                </div>
-                <span className="text-sm">Document</span>
-              </DropdownMenuItem>
-              <DropdownMenuItem className="flex items-center gap-3 p-2 cursor-pointer rounded-lg hover:bg-accent transition-colors">
-                <div className="w-8 h-8 rounded-full bg-purple-500 flex items-center justify-center text-white">
-                  <FontAwesomeIcon icon={faImage} />
-                </div>
-                <span className="text-sm">Photos & Videos</span>
-              </DropdownMenuItem>
-              <DropdownMenuItem className="flex items-center gap-3 p-2 cursor-pointer rounded-lg hover:bg-accent transition-colors">
-                <div className="w-8 h-8 rounded-full bg-pink-500 flex items-center justify-center text-white">
-                  <FontAwesomeIcon icon={faCamera} />
-                </div>
-                <span className="text-sm">Camera</span>
-              </DropdownMenuItem>
-              <DropdownMenuItem className="flex items-center gap-3 p-2 cursor-pointer rounded-lg hover:bg-accent transition-colors">
-                <div className="w-8 h-8 rounded-full bg-blue-400 flex items-center justify-center text-white">
-                  <FontAwesomeIcon icon={faUser} />
-                </div>
-                <span className="text-sm">Contact</span>
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-        <Input 
-          value={inputText}
-          onChange={(e) => setInputText(e.target.value)}
-          placeholder="Type a message"
-          className="flex-1 border-none bg-[hsl(var(--input-bg))] shadow-none focus-visible:ring-0 text-foreground h-10 placeholder:text-muted-foreground rounded-lg"
-        />
-        <div className="text-muted-foreground flex items-center justify-center w-10">
-          {inputText ? (
-             <FontAwesomeIcon icon={faPaperPlane} className="h-6 w-6 text-primary cursor-pointer hover:scale-110 transition-transform" />
-          ) : (
-            <FontAwesomeIcon icon={faMicrophone} className="h-6 w-6 cursor-pointer hover:text-foreground transition-colors" />
-          )}
-        </div>
+      <div className="h-[62px] bg-[hsl(var(--chat-header-bg))] px-4 flex items-center gap-4 shrink-0 relative">
+        {isRecording ? (
+          <div className="flex-1 flex items-center justify-between bg-background/50 rounded-lg h-10 px-4 animate-in fade-in slide-in-from-bottom-2 duration-300">
+            <div className="flex items-center gap-3">
+              <div className="w-2 h-2 rounded-full bg-destructive animate-pulse" />
+              <span className="text-sm font-medium text-foreground">Recording {formatRecordingTime(recordingTime)}</span>
+            </div>
+            <div className="flex items-center gap-4">
+              <FontAwesomeIcon 
+                icon={faTrash} 
+                className="h-5 w-5 text-muted-foreground cursor-pointer hover:text-destructive transition-colors"
+                onClick={cancelRecording}
+              />
+              <div 
+                className="bg-primary h-8 w-8 rounded-full flex items-center justify-center text-primary-foreground cursor-pointer hover:scale-105 transition-transform"
+                onClick={stopRecording}
+              >
+                <FontAwesomeIcon icon={faPaperPlane} className="h-4 w-4" />
+              </div>
+            </div>
+          </div>
+        ) : (
+          <>
+            <div className="flex gap-3 text-muted-foreground items-center">
+              <div className="relative" ref={pickerRef}>
+                <FontAwesomeIcon 
+                  icon={faFaceSmile} 
+                  className={`h-6 w-6 cursor-pointer hover:text-foreground transition-colors ${isEmojiPickerOpen ? 'text-primary' : ''}`} 
+                  onClick={() => setIsEmojiPickerOpen(!isEmojiPickerOpen)}
+                />
+                {isEmojiPickerOpen && (
+                  <div className="absolute bottom-12 left-0 z-50 animate-in fade-in zoom-in-95 duration-200">
+                    <EmojiPicker 
+                      onEmojiClick={handleEmojiClick}
+                      theme={Theme.DARK}
+                      width={320}
+                      height={400}
+                      lazyLoadEmojis={true}
+                    />
+                  </div>
+                )}
+              </div>
+              
+              <input 
+                type="file" 
+                ref={fileInputRef} 
+                className="hidden" 
+                onChange={handleFileSelect}
+              />
+              <FontAwesomeIcon 
+                icon={faPaperclip} 
+                className="h-6 w-6 cursor-pointer hover:text-foreground transition-colors rotate-[45deg]" 
+                onClick={() => handleFileClick('all')}
+              />
+            </div>
+            <Input 
+              value={inputText}
+              onChange={(e) => setInputText(e.target.value)}
+              placeholder="Type a message"
+              className="flex-1 border-none bg-[hsl(var(--input-bg))] shadow-none focus-visible:ring-0 text-foreground h-10 placeholder:text-muted-foreground rounded-lg"
+            />
+            <div className="text-muted-foreground flex items-center justify-center w-10">
+              {inputText ? (
+                 <FontAwesomeIcon icon={faPaperPlane} className="h-6 w-6 text-primary cursor-pointer hover:scale-110 transition-transform" />
+              ) : (
+                <FontAwesomeIcon 
+                  icon={faMicrophone} 
+                  className="h-6 w-6 cursor-pointer hover:text-primary transition-colors" 
+                  onClick={startRecording}
+                />
+              )}
+            </div>
+          </>
+        )}
       </div>
     </div>
   );

@@ -7,17 +7,45 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faCamera } from '@fortawesome/free-solid-svg-icons';
 
 export function ProfileSettings() {
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
+  const [avatar, setAvatar] = React.useState("https://github.com/shadcn.png");
+
+  const handleAvatarClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setAvatar(reader.result as string);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
   return (
     <div className="space-y-8">
       <div className="flex flex-col items-center gap-4">
         <div className="relative group">
           <Avatar className="h-24 w-24 border-2 border-primary/20">
-            <AvatarImage src="https://github.com/shadcn.png" />
+            <AvatarImage src={avatar} />
             <AvatarFallback>JD</AvatarFallback>
           </Avatar>
-          <button className="absolute inset-0 bg-black/40 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer">
+          <button 
+            onClick={handleAvatarClick}
+            className="absolute inset-0 bg-black/40 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+          >
             <FontAwesomeIcon icon={faCamera} className="text-white text-xl" />
           </button>
+          <input 
+            type="file" 
+            ref={fileInputRef} 
+            className="hidden" 
+            accept="image/*"
+            onChange={handleFileChange}
+          />
         </div>
         <p className="text-xs text-muted-foreground">Click the avatar to change your profile picture</p>
       </div>
