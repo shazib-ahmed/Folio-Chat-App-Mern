@@ -9,7 +9,7 @@ import { MessageBubble } from "./MessageBubble";
 import { Chat, Message } from "../types";
 import { cn } from "@/shared/lib/utils";
 
-import { getMessagesApi, sendMessageApi, markSeenApi, blockUserApi, unblockUserApi, acceptRequestApi } from '../chatService';
+import { getMessagesApi, sendMessageApi, markSeenApi, blockUserApi, unblockUserApi, acceptRequestApi, searchMessagesApi } from '../chatService';
 import { subscribeToMessages, getSocket } from '@/shared/lib/socket';
 import { useSelector, useDispatch } from 'react-redux';
 import { RootState, AppDispatch } from '@/app/store';
@@ -45,6 +45,8 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
   const [hasMore, setHasMore] = useState(false);
   const [isFetchingMore, setIsFetchingMore] = useState(false);
+  const [searchResults, setSearchResults] = useState<string[]>([]);
+  const [searchMatchIndex, setSearchMatchIndex] = useState(-1);
   
   const dispatch = useDispatch<AppDispatch>();
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -67,6 +69,7 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
   const audioChunksRef = useRef<Blob[]>([]);
   const recordingTimerRef = useRef<NodeJS.Timeout | null>(null);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Update ref when chat changes
   useEffect(() => {
@@ -99,7 +102,71 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
     }
   }, [chat?.username, chat?.id, dispatch]);
 
-  // Subscribe to real-time messages
+  // Handle message search with debounce and cancellation
+  useEffect(() => {
+    if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
+    const controller = new AbortController();
+    
+    if (searchQuery.trim().length >= 2 && chat?.username) {
+      searchTimeoutRef.current = setTimeout(async () => {
+        try {
+          const results = await searchMessagesApi(chat.username, searchQuery, controller.signal);
+          const resultIds = results.map((r: any) => r.id);
+          setSearchResults(resultIds);
+          setSearchMatchIndex(resultIds.length > 0 ? 0 : -1);
+          
+          if (resultIds.length > 0) {
+            const firstId = resultIds[0];
+            if (localMessages.some(m => m.id === firstId)) {
+              scrollToMessage(firstId);
+            }
+          }
+        } catch (err: any) {
+          if (err.name === 'CanceledError' || err.name === 'AbortError') return;
+          console.error('Search error:', err);
+        }
+      }, 500);
+    } else {
+      setSearchResults([]);
+      setSearchMatchIndex(-1);
+    }
+
+    return () => {
+      if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
+      controller.abort();
+    };
+  }, [searchQuery, chat?.username, localMessages]);
+
+  const scrollToMessage = (id: string) => {
+    const element = document.getElementById(`msg-${id}`);
+    if (element) {
+      element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      // Add a temporary highlight effect
+      element.classList.add('bg-primary/20');
+      setTimeout(() => element.classList.remove('bg-primary/20'), 2000);
+    }
+  };
+
+  const navigateSearch = (direction: 'next' | 'prev') => {
+    if (searchResults.length === 0) return;
+    
+    let newIndex = searchMatchIndex;
+    if (direction === 'next') {
+      newIndex = (searchMatchIndex + 1) % searchResults.length;
+    } else {
+      newIndex = (searchMatchIndex - 1 + searchResults.length) % searchResults.length;
+    }
+    
+    setSearchMatchIndex(newIndex);
+    const targetId = searchResults[newIndex];
+    
+    if (localMessages.some(m => m.id === targetId)) {
+      scrollToMessage(targetId);
+    } else {
+      // Message not loaded locally
+      console.log('Message not in local view, would need to fetch context');
+    }
+  };
   useEffect(() => {
     return subscribeToMessages((err: Error | null, msg: any) => {
       if (err) return;
@@ -517,15 +584,19 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
       {/* Header */}
       <div className="h-[60px] bg-[hsl(var(--chat-header-bg))] px-4 flex items-center justify-between shrink-0 border-b relative">
         {isSearching ? (
-          <div className="flex-1 flex items-center gap-4 animate-in fade-in slide-in-from-right-4 duration-300">
-            <FontAwesomeIcon 
-              icon={faArrowLeft} 
-              className="text-muted-foreground cursor-pointer hover:text-foreground h-4 w-4"
+          <div className="flex-1 flex items-center gap-2 animate-in fade-in slide-in-from-right-4 duration-300">
+            <Button 
+              variant="ghost" 
+              size="icon"
+              className="h-8 w-8 rounded-full"
               onClick={() => {
                 setIsSearching(false);
                 setSearchQuery("");
+                setSearchResults([]);
               }}
-            />
+            >
+              <FontAwesomeIcon icon={faArrowLeft} className="text-muted-foreground h-4 w-4" />
+            </Button>
             <div className="flex-1 relative">
               <Input 
                 autoFocus
@@ -535,11 +606,37 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
                 className="w-full bg-transparent border-none focus-visible:ring-0 h-10 px-0 text-sm"
               />
             </div>
-            <FontAwesomeIcon 
-              icon={faXmark} 
-              className="text-muted-foreground cursor-pointer hover:text-foreground h-4 w-4"
+            {searchResults.length > 0 && (
+              <div className="flex items-center gap-1 text-xs text-muted-foreground mr-2">
+                <span>{searchMatchIndex + 1} of {searchResults.length}</span>
+                <div className="flex gap-1">
+                  <Button 
+                    variant="ghost" 
+                    size="icon" 
+                    className="h-7 w-7" 
+                    onClick={() => navigateSearch('prev')}
+                  >
+                    <FontAwesomeIcon icon={faChevronDown} className="h-3 w-3 rotate-180" />
+                  </Button>
+                  <Button 
+                    variant="ghost" 
+                    size="icon" 
+                    className="h-7 w-7" 
+                    onClick={() => navigateSearch('next')}
+                  >
+                    <FontAwesomeIcon icon={faChevronDown} className="h-3 w-3" />
+                  </Button>
+                </div>
+              </div>
+            )}
+            <Button 
+              variant="ghost" 
+              size="icon"
+              className="h-8 w-8 rounded-full"
               onClick={() => setSearchQuery("")}
-            />
+            >
+              <FontAwesomeIcon icon={faXmark} className="text-muted-foreground h-4 w-4" />
+            </Button>
           </div>
         ) : (
           <>
@@ -717,12 +814,20 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
             <ChatWindowSkeleton />
           ) : (
             <div className="flex flex-col w-full gap-1">
-              {localMessages.map(msg => (
-                <MessageBubble 
+               {localMessages.map(msg => (
+                <div 
                   key={msg.id} 
-                  message={msg} 
-                  isMe={String(msg.senderId) === String(me?.id)}
-                />
+                  id={`msg-${msg.id}`}
+                  className={cn(
+                    "transition-colors duration-500 rounded-lg",
+                    searchResults[searchMatchIndex] === msg.id && "bg-primary/10 ring-1 ring-primary/20"
+                  )}
+                >
+                  <MessageBubble 
+                    message={msg} 
+                    isMe={String(msg.senderId) === String(me?.id)}
+                  />
+                </div>
               ))}
               
               {isTyping && (

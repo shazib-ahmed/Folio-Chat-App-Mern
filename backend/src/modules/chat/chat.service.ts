@@ -412,4 +412,38 @@ export class ChatService {
       return { success: false };
     }
   }
+
+  async searchMessages(userId: number, otherUsername: string, query: string) {
+    if (!query || query.trim().length < 2) return [];
+
+    const otherUser = await this.prisma.user.findUnique({
+      where: { username: otherUsername }
+    });
+
+    if (!otherUser) return [];
+
+    const chatRoom = await this.getOrCreateChatRoom(userId, otherUser.id);
+
+    const messages = await this.prisma.message.findMany({
+      where: {
+        chatRoomId: chatRoom.id,
+        message: {
+          contains: query,
+        },
+        deletedAt: null
+      },
+      orderBy: {
+        createdAt: 'desc'
+      },
+      take: 50
+    });
+
+    return messages.map(msg => ({
+      id: msg.id.toString(),
+      senderId: msg.senderId.toString(),
+      text: msg.message,
+      timestamp: this.formatTime(msg.createdAt),
+      messageType: msg.messageType,
+    }));
+  }
 }

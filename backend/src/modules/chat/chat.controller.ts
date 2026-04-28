@@ -76,4 +76,14 @@ export class ChatController {
     const user = req.user as any;
     return this.chatService.acceptChatRequest(user.userId, Number(userId));
   }
+  
+  @Get('messages/:username/search')
+  async searchMessages(
+    @Req() req: express.Request,
+    @Param('username') username: string,
+    @Query('q') query: string
+  ) {
+    const user = req.user as any;
+    return this.chatService.searchMessages(user.userId, username, query);
+  }
 }

@@ -51,3 +51,8 @@ export const acceptRequestApi = async (userId: string): Promise<any> => {
   const response = await api.post(`/chat/accept/${userId}`);
   return response.data;
 };
+
+export const searchMessagesApi = async (username: string, query: string, signal?: AbortSignal): Promise<any[]> => {
+  const response = await api.get(`/chat/messages/${username}/search?q=${query}`, { signal });
+  return response.data;
+};
