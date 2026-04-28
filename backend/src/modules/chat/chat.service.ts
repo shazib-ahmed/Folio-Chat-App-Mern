@@ -12,7 +12,7 @@ export class ChatService {
     private cloudinaryService: CloudinaryService,
   ) {}
 
-  async sendMessage(senderId: number, receiverId: number, content: string, type: MessageType, file?: Express.Multer.File) {
+  async sendMessage(senderId: number, receiverId: number, content: string, type: MessageType, file?: Express.Multer.File, isEncrypted: boolean = false) {
     let fileUrl: string | null = null;
     let fileName: string | null = null;
     let fileSize: string | null = null;
@@ -40,6 +40,7 @@ export class ChatService {
         fileSize,
         messageType: type,
         chatRoomId: chatRoom.id,
+        isEncrypted,
       },
       include: {
         sender: true,
@@ -60,6 +61,7 @@ export class ChatService {
       timestamp: this.formatTime(message.createdAt),
       status: message.status.toLowerCase(),
       messageType: message.messageType,
+      isEncrypted: message.isEncrypted,
       sender: {
         id: message.sender.id.toString(),
         name: message.sender.name || message.sender.username,
@@ -218,6 +220,7 @@ export class ChatService {
         timestamp: this.formatTime(msg.createdAt),
         status: msg.status.toLowerCase(),
         messageType: msg.messageType,
+        isEncrypted: msg.isEncrypted,
       })),
       chatStatus: chatRoom.status,
       requesterId: chatRoom.requesterId ? chatRoom.requesterId.toString() : null,
@@ -312,6 +315,7 @@ export class ChatService {
             lastMessageTime: this.formatTime(msg.createdAt),
             online: otherUser.isOnline,
             unreadCount: unreadCount,
+            isEncrypted: msg.isEncrypted,
             lastSeen: otherUser.lastSeen ? this.formatTime(otherUser.lastSeen) : null,
             ...(await this.getBlockStatus(userId, otherUser.id))
           });
@@ -445,5 +449,13 @@ export class ChatService {
       timestamp: this.formatTime(msg.createdAt),
       messageType: msg.messageType,
     }));
+  }
+
+  async getPublicKey(username: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { username },
+      select: { publicKey: true }
+    });
+    return user?.publicKey || null;
   }
 }

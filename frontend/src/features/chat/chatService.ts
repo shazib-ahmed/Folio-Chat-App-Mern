@@ -56,3 +56,13 @@ export const searchMessagesApi = async (username: string, query: string, signal?
   const response = await api.get(`/chat/messages/${username}/search?q=${query}`, { signal });
   return response.data;
 };
+
+export const setPublicKeyApi = async (publicKey: string): Promise<any> => {
+  const response = await api.post('/auth/public-key', { publicKey });
+  return response.data;
+};
+
+export const getPublicKeyApi = async (username: string): Promise<string | null> => {
+  const response = await api.get(`/chat/user/${username}/public-key`);
+  return response.data;
+};

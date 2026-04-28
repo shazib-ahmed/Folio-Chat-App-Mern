@@ -9,7 +9,8 @@ import { MessageBubble } from "./MessageBubble";
 import { Chat, Message } from "../types";
 import { cn } from "@/shared/lib/utils";
 
-import { getMessagesApi, sendMessageApi, markSeenApi, blockUserApi, unblockUserApi, acceptRequestApi, searchMessagesApi } from '../chatService';
+import { getMessagesApi, sendMessageApi, markSeenApi, blockUserApi, unblockUserApi, acceptRequestApi, searchMessagesApi, getPublicKeyApi } from '../chatService';
+import { encryptForRecipient, decryptWithPrivateKey, getLocalPrivateKey } from '@/shared/lib/cryptoUtils';
 import { subscribeToMessages, getSocket } from '@/shared/lib/socket';
 import { useSelector, useDispatch } from 'react-redux';
 import { RootState, AppDispatch } from '@/app/store';
@@ -47,6 +48,7 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
   const [isFetchingMore, setIsFetchingMore] = useState(false);
   const [searchResults, setSearchResults] = useState<string[]>([]);
   const [searchMatchIndex, setSearchMatchIndex] = useState(-1);
+  const [recipientPublicKey, setRecipientPublicKey] = useState<string | null>(null);
   
   const dispatch = useDispatch<AppDispatch>();
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -77,14 +79,28 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
     setIsTyping(false); // Reset typing status when switching chats
   }, [chat]);
 
-  // Fetch messages when chat changes
+  // Fetch messages and public key when chat changes
   useEffect(() => {
     if (chat?.username) {
       setIsLoadingMessages(true);
       setLocalMessages([]); // Clear messages immediately when switching chats
-      (getMessagesApi(chat.username) as Promise<any>).then(data => {
-        // data is { messages, isBlocked, blockedByMe, hasMore }
-        setLocalMessages(data.messages || []);
+      setRecipientPublicKey(null);
+
+      // Fetch recipient's public key
+      getPublicKeyApi(chat.username).then(key => {
+        setRecipientPublicKey(key);
+      }).catch(err => console.error('Failed to fetch public key:', err));
+
+      (getMessagesApi(chat.username) as Promise<any>).then(async data => {
+        const privateKey = await getLocalPrivateKey();
+        const decryptedMessages = await Promise.all((data.messages || []).map(async (msg: any) => {
+          if (msg.isEncrypted && privateKey && msg.text) {
+            return { ...msg, text: await decryptWithPrivateKey(msg.text, privateKey) };
+          }
+          return msg;
+        }));
+
+        setLocalMessages(decryptedMessages);
         setIsBlocked(data.isBlocked);
         setBlockedByMe(data.blockedByMe);
         setChatStatus(data.chatStatus || 'ACCEPTED');
@@ -167,11 +183,13 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
       console.log('Message not in local view, would need to fetch context');
     }
   };
+  // Subscribe to real-time messages
   useEffect(() => {
-    return subscribeToMessages((err: Error | null, msg: any) => {
+    return subscribeToMessages(async (err: Error | null, msg: any) => {
       if (err) return;
-      
-      // If it's a 'userBlockStatus' event
+      if (!msg) return;
+
+      // Handle events first
       if (msg.type === 'userBlockStatus') {
         if (chat && String(msg.blockerId) === String(chat.id)) {
           setIsBlocked(msg.isBlocked);
@@ -187,7 +205,6 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
         return;
       }
 
-      // If it's a 'messagesSeen' event
       if (msg.type === 'messagesSeen') {
         if (chat && msg.chatId === chat.id) {
           setLocalMessages(prev => prev.map(m => ({ ...m, status: 'SEEN' as any })));
@@ -195,40 +212,36 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
         return;
       }
 
-      // Handle typing status
       if (msg.type === 'typing') {
         const activeChatId = currentChatRef.current?.id;
-        console.log(`Typing event from ${msg.senderId}. Active chat: ${activeChatId}`);
         if (String(msg.senderId) === String(activeChatId)) {
           setIsTyping(true);
         }
         return;
       } else if (msg.type === 'stopTyping') {
         const activeChatId = currentChatRef.current?.id;
-        console.log(`Stop typing event from ${msg.senderId}. Active chat: ${activeChatId}`);
         if (String(msg.senderId) === String(activeChatId)) {
           setIsTyping(false);
         }
         return;
       }
 
-      // Handle user block status
-      if (msg.type === 'userBlockStatus') {
-        if (chat && String(msg.blockerId) === String(chat.id)) {
-          setIsBlocked(msg.isBlocked);
-          setBlockedByMe(false);
+      // Handle new messages with decryption
+      if (chat && (String(msg.senderId) === String(chat.id) || String(msg.receiverId) === String(chat.id) || String(msg.senderId) === String(me?.id) || String(msg.receiverId) === String(me?.id))) {
+        
+        let decryptedMsg = { ...msg };
+        if (msg.isEncrypted && msg.text) {
+          const privateKey = await getLocalPrivateKey();
+          if (privateKey) {
+            decryptedMsg.text = await decryptWithPrivateKey(msg.text, privateKey);
+          }
         }
-        return;
-      }
 
-      // Only append if the message belongs to the current active chat
-      if (chat && (msg.senderId === chat.id || msg.receiverId === chat.id || msg.senderId === me?.id?.toString() || msg.receiverId === me?.id?.toString())) {
         setLocalMessages(prev => {
           // If this is my own message coming from socket, replace the pending one
           const isMine = String(msg.senderId) === String(me?.id);
           
           if (isMine) {
-            // Find a temp message with the same text/type
             const tempIndex = prev.findIndex(m => 
               m.id.toString().startsWith('temp-') && 
               (m.text === msg.text || (m.messageType === msg.messageType && msg.messageType !== 'TEXT'))
@@ -236,18 +249,18 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
             
             if (tempIndex !== -1) {
               const newMsgs = [...prev];
-              newMsgs[tempIndex] = msg;
+              newMsgs[tempIndex] = decryptedMsg;
               return newMsgs;
             }
           }
 
           // Check for duplicates by ID
-          if (prev.find(m => m.id === msg.id)) return prev;
-          return [...prev, msg];
+          if (prev.some(m => m.id === msg.id)) return prev;
+          return [...prev, decryptedMsg];
         });
 
         // If I received a message in the active chat, mark it as seen
-        if (msg.receiverId === me?.id?.toString() && msg.senderId === chat.id) {
+        if (String(msg.receiverId) === String(me?.id) && String(msg.senderId) === String(chat.id)) {
           markSeenApi(chat.id).then(() => {
             dispatch(clearUnreadCount(chat.id));
           }).catch(err => console.error('Failed to mark as seen:', err));
@@ -307,9 +320,23 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
       setRequesterId(String(me.id));
     }
 
+    let finalMessage = inputText;
+    let isEncrypted = false;
+
+    // Encrypt message if public key is available and it's a text message or has a caption
+    if (recipientPublicKey && inputText.trim()) {
+      try {
+        finalMessage = await encryptForRecipient(inputText, recipientPublicKey);
+        isEncrypted = true;
+      } catch (err) {
+        console.error("Encryption failed, sending as plain text:", err);
+      }
+    }
+
     const formData = new FormData();
     formData.append('receiverId', chat.id);
-    formData.append('message', inputText);
+    formData.append('message', finalMessage);
+    formData.append('isEncrypted', isEncrypted.toString());
     
     if (audioBlob) {
       formData.append('type', 'AUDIO');
@@ -486,7 +513,15 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
     try {
       const data = await getMessagesApi(chat.username, oldestMessageId);
       if (data.messages && data.messages.length > 0) {
-        setLocalMessages(prev => [...data.messages, ...prev]);
+        const privateKey = await getLocalPrivateKey();
+        const decryptedMessages = await Promise.all(data.messages.map(async (msg: any) => {
+          if (msg.isEncrypted && privateKey && msg.text) {
+            return { ...msg, text: await decryptWithPrivateKey(msg.text, privateKey) };
+          }
+          return msg;
+        }));
+
+        setLocalMessages(prev => [...decryptedMessages, ...prev]);
         setHasMore(data.hasMore);
         
         // Preserve scroll position after DOM update

@@ -246,4 +246,11 @@ export class AuthService {
 
     return { message: 'Password updated successfully' };
   }
+
+  async updatePublicKey(userId: number, publicKey: string) {
+    return this.prisma.user.update({
+      where: { id: userId },
+      data: { publicKey },
+    });
+  }
 }

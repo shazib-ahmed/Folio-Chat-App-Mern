@@ -36,10 +36,11 @@ export class ChatController {
     @Body('receiverId') receiverId: string,
     @Body('message') message: string,
     @Body('type') type: MessageType,
+    @Body('isEncrypted') isEncrypted?: string,
     @UploadedFile() file?: Express.Multer.File,
   ) {
     const user = req.user as any;
-    return this.chatService.sendMessage(user.userId, Number(receiverId), message, type, file);
+    return this.chatService.sendMessage(user.userId, Number(receiverId), message, type, file, String(isEncrypted) === 'true');
   }
 
   @Get('messages/:username')
@@ -85,5 +86,10 @@ export class ChatController {
   ) {
     const user = req.user as any;
     return this.chatService.searchMessages(user.userId, username, query);
+  }
+
+  @Get('user/:username/public-key')
+  async getPublicKey(@Param('username') username: string) {
+    return this.chatService.getPublicKey(username);
   }
 }

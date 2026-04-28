@@ -62,4 +62,11 @@ export class AuthController {
     const user = req.user as any;
     return this.authService.updatePassword(user.userId, dto);
   }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('public-key')
+  updatePublicKey(@Req() req: express.Request, @Body('publicKey') publicKey: string) {
+    const user = req.user as any;
+    return this.authService.updatePublicKey(user.userId, publicKey);
+  }
 }
