@@ -10,7 +10,7 @@ import { Chat, Message } from "../types";
 import { useNavigate } from "react-router-dom";
 import { cn } from "@/shared/lib/utils";
 
-import { getMessagesApi, sendMessageApi, markSeenApi, blockUserApi, unblockUserApi } from '../chatService';
+import { getMessagesApi, sendMessageApi, markSeenApi, blockUserApi, unblockUserApi, acceptRequestApi } from '../chatService';
 import { subscribeToMessages, getSocket } from '@/shared/lib/socket';
 import { useSelector, useDispatch } from 'react-redux';
 import { RootState, AppDispatch } from '@/app/store';
@@ -60,6 +60,9 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
   const [blockedByMe, setBlockedByMe] = useState(false);
   const [isUnblockModalOpen, setIsUnblockModalOpen] = useState(false);
   const [isBlockingAction, setIsBlockingAction] = useState(false);
+  const [chatStatus, setChatStatus] = useState<'PENDING' | 'ACCEPTED'>('ACCEPTED');
+  const [requesterId, setRequesterId] = useState<string | null>(null);
+  const [isAcceptModalOpen, setIsAcceptModalOpen] = useState(false);
   const audioChunksRef = useRef<Blob[]>([]);
   const recordingTimerRef = useRef<NodeJS.Timeout | null>(null);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -79,6 +82,8 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
         setLocalMessages(data.messages || []);
         setIsBlocked(data.isBlocked);
         setBlockedByMe(data.blockedByMe);
+        setChatStatus(data.chatStatus || 'ACCEPTED');
+        setRequesterId(data.requesterId ? String(data.requesterId) : null);
         
         // Mark as seen when opening the chat
         markSeenApi(chat.id).then(() => {
@@ -101,6 +106,13 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
         if (chat && String(msg.blockerId) === String(chat.id)) {
           setIsBlocked(msg.isBlocked);
           setBlockedByMe(false); // If I received this, it means the OTHER person blocked/unblocked me
+        }
+        return;
+      }
+
+      if (msg.type === 'chatRequestAccepted') {
+        if (chat && (String(msg.acceptedBy) === String(chat.id))) {
+          setChatStatus('ACCEPTED');
         }
         return;
       }
@@ -218,6 +230,11 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
     if (isBlocked) {
       alert(blockedByMe ? "You have blocked this contact. Unblock to send messages." : "You are blocked. You cannot send messages.");
       return;
+    }
+
+    // If this is the first message, set me as requester to avoid seeing the banner
+    if (!requesterId) {
+      setRequesterId(String(me.id));
     }
 
     const formData = new FormData();
@@ -362,9 +379,20 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
         setIsEmojiPickerOpen(false);
       }
     };
+
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
+
+  const handleAcceptRequest = async () => {
+    if (!chat || !me) return;
+    try {
+      await acceptRequestApi(chat.id);
+      setChatStatus('ACCEPTED');
+    } catch (err) {
+      console.error('Failed to accept request:', err);
+    }
+  };
 
 
   const scrollToBottom = () => {
@@ -451,15 +479,26 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
           </div>
         ) : (
           <>
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-1">
               <Button 
                 variant="ghost" 
                 size="icon" 
-                className="lg:hidden text-muted-foreground hover:text-foreground -ml-2"
-                onClick={() => navigate('/')}
+                className="h-9 w-9 rounded-full text-muted-foreground hover:text-primary hover:bg-primary/10 transition-all disabled:opacity-30"
+                onClick={() => chat && onStartAudioCall?.(chat)}
+                disabled={isBlocked || chatStatus === 'PENDING'}
               >
-                <FontAwesomeIcon icon={faArrowLeft} className="h-5 w-5" />
+                <FontAwesomeIcon icon={faPhone} className="h-4 w-4" />
               </Button>
+              <Button 
+                variant="ghost" 
+                size="icon" 
+                className="h-9 w-9 rounded-full text-muted-foreground hover:text-primary hover:bg-primary/10 transition-all disabled:opacity-30"
+                onClick={() => chat && onStartVideoCall?.(chat)}
+                disabled={isBlocked || chatStatus === 'PENDING'}
+              >
+                <FontAwesomeIcon icon={faVideo} className="h-4 w-4" />
+              </Button>
+              <div className="w-px h-4 bg-border/60 mx-1" />
               <Avatar className="h-10 w-10">
                 <AvatarImage src={chat.avatar} />
                 <AvatarFallback>{chat.name.substring(0, 2).toUpperCase()}</AvatarFallback>
@@ -538,7 +577,7 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
       <Dialog open={isUnblockModalOpen} onOpenChange={setIsUnblockModalOpen}>
         <DialogContent className="max-w-[400px]">
           <DialogHeader>
-            <DialogTitle>Unblock {chat.name}?</DialogTitle>
+            <DialogTitle>Unblock {chat?.name || chat?.username}?</DialogTitle>
             <DialogDescription>
               Unblocking this contact will allow them to send you messages and call you again.
             </DialogDescription>
@@ -554,6 +593,32 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
               className="flex-1 bg-primary text-primary-foreground hover:bg-primary/90"
             >
               {isBlockingAction ? "Unblocking..." : "Unblock User"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isAcceptModalOpen} onOpenChange={setIsAcceptModalOpen}>
+        <DialogContent className="max-w-[400px]">
+          <DialogHeader>
+            <DialogTitle>Accept message request?</DialogTitle>
+            <DialogDescription>
+              Once you accept, you can message each other and see each other's status. They will also see that you've read their messages.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="flex gap-2 sm:gap-0">
+            <Button variant="ghost" onClick={() => setIsAcceptModalOpen(false)} disabled={isBlockingAction} className="flex-1">
+              Cancel
+            </Button>
+            <Button 
+              className="flex-1 bg-primary text-primary-foreground hover:bg-primary/90" 
+              onClick={() => {
+                handleAcceptRequest();
+                setIsAcceptModalOpen(false);
+              }}
+              disabled={isBlockingAction}
+            >
+              Accept
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -643,8 +708,36 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
               </Button>
             )}
           </div>
+        ) : chatStatus === 'PENDING' && requesterId && requesterId !== String(me?.id) && localMessages.length > 0 ? (
+          <div className="p-8 flex flex-col items-center justify-center bg-background/80 backdrop-blur-md animate-in slide-in-from-bottom-4 duration-500 border-t">
+             <div className="w-16 h-16 bg-primary/10 rounded-full flex items-center justify-center mb-4">
+                <Avatar className="h-12 w-12 border-2 border-primary/20">
+                  <AvatarImage src={chat?.avatar} />
+                  <AvatarFallback>{chat?.name?.charAt(0) || chat?.username?.charAt(0)}</AvatarFallback>
+                </Avatar>
+             </div>
+             <h3 className="text-lg font-bold mb-1">{chat?.name || chat?.username}</h3>
+             <p className="text-sm text-muted-foreground mb-6 text-center max-w-[280px]">
+               Wants to connect with you. They won't know you've seen their message until you accept.
+             </p>
+             <div className="flex gap-3 w-full max-w-[320px]">
+                <Button variant="outline" className="flex-1 rounded-full border-destructive/20 text-destructive hover:bg-destructive/10" onClick={() => setIsBlockModalOpen(true)}>
+                  Block
+                </Button>
+                <Button className="flex-1 rounded-full bg-primary hover:bg-primary/90 text-primary-foreground shadow-lg shadow-primary/20" onClick={() => setIsAcceptModalOpen(true)}>
+                  Accept
+                </Button>
+             </div>
+          </div>
         ) : (
           <>
+            {chatStatus === 'PENDING' && requesterId === String(me?.id) && (
+              <div className="bg-primary/5 px-4 py-2 text-center border-b">
+                <p className="text-[10px] uppercase tracking-wider font-bold text-primary/70">
+                  Message request sent. Waiting for response.
+                </p>
+              </div>
+            )}
             {selectedFile && (
               <div className="px-4 py-3 bg-background/80 backdrop-blur-md border-b animate-in slide-in-from-bottom-2 duration-300">
                 <div className="flex items-center justify-between p-2 bg-accent/30 rounded-lg">

@@ -72,7 +72,9 @@ function ChatLayout() {
             chatId: String(sidebarChatId),
             message: msg.sidebarText || msg.text || '',
             time: msg.timestamp,
-            isMine: isMine
+            isMine: isMine,
+            sender: msg.sender,
+            receiver: msg.receiver
           }));
         }
       }

@@ -44,3 +44,8 @@ export const unblockUserApi = async (userId: string): Promise<any> => {
   const response = await api.post(`/chat/unblock/${userId}`);
   return response.data;
 };
+
+export const acceptRequestApi = async (userId: string): Promise<any> => {
+  const response = await api.post(`/chat/accept/${userId}`);
+  return response.data;
+};

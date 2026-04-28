@@ -48,12 +48,19 @@ model Otp {
 model ChatRoom {
   id         Int       @id @default(autoincrement())
   chatRoomId String    @unique // Unique identifier for the room
+  status     ChatStatus @default(PENDING)
+  requesterId Int?      // The user who initiated the chat
   
   createdAt  DateTime  @default(now())
   updatedAt  DateTime  @updatedAt
   deletedAt  DateTime?
 
   messages   Message[]
+}
+
+enum ChatStatus {
+  PENDING
+  ACCEPTED
 }
 
 model Message {

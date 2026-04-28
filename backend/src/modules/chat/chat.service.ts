@@ -24,7 +24,11 @@ export class ChatService {
       fileSize = `${(file.size / 1024 / 1024).toFixed(2)} MB`;
     }
 
-    const chatRoom = await this.getOrCreateChatRoom(senderId, receiverId);
+    const chatRoom = await this.getOrCreateChatRoom(senderId, receiverId, senderId);
+    
+    // Check if the chat is accepted or if it's the very first message
+    // Messenger allows the first message to be sent even if pending
+    // But we should mark it as ACCEPTED if it was already accepted
 
     const message = await this.prisma.message.create({
       data: {
@@ -54,8 +58,22 @@ export class ChatService {
       fileSize: message.fileSize,
       sidebarText: this.formatLastMessage(message),
       timestamp: this.formatTime(message.createdAt),
-      status: message.status,
+      status: message.status.toLowerCase(),
       messageType: message.messageType,
+      sender: {
+        id: message.sender.id.toString(),
+        name: message.sender.name || message.sender.username,
+        username: message.sender.username,
+        avatar: message.sender.avatar,
+        online: message.sender.isOnline
+      },
+      receiver: {
+        id: message.receiver.id.toString(),
+        name: message.receiver.name || message.receiver.username,
+        username: message.receiver.username,
+        avatar: message.receiver.avatar,
+        online: message.receiver.isOnline
+      }
     };
 
     const isBlocked = await this.prisma.block.findFirst({
@@ -119,6 +137,29 @@ export class ChatService {
     return { success: true };
   }
 
+  async acceptChatRequest(userId: number, otherId: number) {
+    const chatRoomIdStr = [userId, otherId].sort((a, b) => a - b).join('_');
+    
+    const chatRoom = await this.prisma.chatRoom.findUnique({
+      where: { chatRoomId: chatRoomIdStr }
+    });
+
+    if (!chatRoom) throw new Error('Chat room not found');
+
+    await this.prisma.chatRoom.update({
+      where: { id: chatRoom.id },
+      data: { status: 'ACCEPTED' }
+    });
+
+    // Notify the requester
+    this.chatGateway.sendMessageToUser(otherId, 'chatRequestAccepted', {
+      acceptedBy: userId,
+      chatRoomId: chatRoomIdStr
+    });
+
+    return { success: true };
+  }
+
   async getBlockStatus(user1Id: number, user2Id: number) {
     const block = await this.prisma.block.findFirst({
       where: {
@@ -169,11 +210,13 @@ export class ChatService {
         status: msg.status.toLowerCase(),
         messageType: msg.messageType,
       })),
+      chatStatus: chatRoom.status,
+      requesterId: chatRoom.requesterId ? chatRoom.requesterId.toString() : null,
       ...blockStatus
     };
   }
 
-  private async getOrCreateChatRoom(user1Id: number, user2Id: number) {
+  private async getOrCreateChatRoom(user1Id: number, user2Id: number, requesterId?: number) {
     const chatRoomIdStr = [user1Id, user2Id].sort((a, b) => a - b).join('_');
     
     let chatRoom = await this.prisma.chatRoom.findUnique({
@@ -182,7 +225,17 @@ export class ChatService {
 
     if (!chatRoom) {
       chatRoom = await this.prisma.chatRoom.create({
-        data: { chatRoomId: chatRoomIdStr }
+        data: { 
+          chatRoomId: chatRoomIdStr,
+          requesterId: requesterId || null,
+          status: 'PENDING'
+        }
+      });
+    } else if (!chatRoom.requesterId && requesterId) {
+      // If room exists but no requester set (from old data), set it now
+      chatRoom = await this.prisma.chatRoom.update({
+        where: { id: chatRoom.id },
+        data: { requesterId }
       });
     }
 

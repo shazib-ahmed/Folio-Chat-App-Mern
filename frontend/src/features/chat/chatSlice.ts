@@ -45,22 +45,49 @@ const chatSlice = createSlice({
       message: string; 
       time: string;
       isMine?: boolean;
+      sender?: any;
+      receiver?: any;
     }>) => {
-      const { chatId, message, time, isMine } = action.payload;
+      const { chatId, message, time, isMine, sender, receiver } = action.payload;
       const chatIndex = state.chats.findIndex(c => c.id === chatId);
+      
       if (chatIndex !== -1) {
         const chat = { ...state.chats[chatIndex] };
         chat.lastMessage = isMine ? `You: ${message}` : message;
         chat.lastMessageTime = time;
         
-        // Increment unread count if it's NOT my own message
         if (!isMine) {
           chat.unreadCount = (chat.unreadCount || 0) + 1;
         }
 
-        // Remove from current position and move to top
         state.chats.splice(chatIndex, 1);
         state.chats = [chat, ...state.chats];
+      } else if (!isMine && sender) {
+        // New incoming chat room
+        const newChat: Chat = {
+          id: sender.id,
+          name: sender.name,
+          username: sender.username,
+          avatar: sender.avatar,
+          online: sender.online,
+          lastMessage: message,
+          lastMessageTime: time,
+          unreadCount: 1
+        };
+        state.chats = [newChat, ...state.chats];
+      } else if (isMine && receiver) {
+        // New outgoing chat room
+        const newChat: Chat = {
+          id: receiver.id,
+          name: receiver.name,
+          username: receiver.username,
+          avatar: receiver.avatar,
+          online: receiver.online,
+          lastMessage: `You: ${message}`,
+          lastMessageTime: time,
+          unreadCount: 0
+        };
+        state.chats = [newChat, ...state.chats];
       }
     },
     clearUnreadCount: (state, action: PayloadAction<string>) => {

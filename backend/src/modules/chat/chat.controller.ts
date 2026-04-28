@@ -65,4 +65,10 @@ export class ChatController {
     const user = req.user as any;
     return this.chatService.unblockUser(user.userId, Number(userId));
   }
+
+  @Post('accept/:userId')
+  async acceptRequest(@Req() req: express.Request, @Param('userId') userId: string) {
+    const user = req.user as any;
+    return this.chatService.acceptChatRequest(user.userId, Number(userId));
+  }
 }
