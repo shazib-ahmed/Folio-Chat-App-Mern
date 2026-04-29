@@ -51,8 +51,10 @@ export class AuthService {
       data: {
         ...dto,
         password: hashedPassword,
+        avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${dto.username}`,
       },
     });
+
 
     const tokens = await this.getTokens(user.id, user.username);
     await this.updateRefreshToken(user.id, tokens.refresh_token);

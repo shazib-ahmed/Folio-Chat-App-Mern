@@ -46,18 +46,26 @@ const getDB = (): Promise<IDBDatabase> => {
   });
 };
 
+let cachedPrivateKey: CryptoKey | null = null;
+
 export const savePrivateKey = async (privateKey: CryptoKey): Promise<void> => {
+  cachedPrivateKey = privateKey;
   const db = await getDB();
   const tx = db.transaction(STORE_NAME, "readwrite");
   tx.objectStore(STORE_NAME).put(privateKey, "privateKey");
 };
 
 export const getLocalPrivateKey = async (): Promise<CryptoKey | null> => {
+  if (cachedPrivateKey) return cachedPrivateKey;
+  
   const db = await getDB();
   const tx = db.transaction(STORE_NAME, "readonly");
   return new Promise((resolve) => {
     const request = tx.objectStore(STORE_NAME).get("privateKey");
-    request.onsuccess = () => resolve(request.result || null);
+    request.onsuccess = () => {
+      cachedPrivateKey = request.result || null;
+      resolve(cachedPrivateKey);
+    };
     request.onerror = () => resolve(null);
   });
 };
@@ -153,14 +161,32 @@ export const encryptForBoth = async (text: string, recipientPubKeyPem: string, s
   });
 };
 
+export const isEncryptedPayload = (val: any): boolean => {
+  if (typeof val !== 'string') return false;
+  if (!val.startsWith('{') || !val.endsWith('}')) return false;
+  try {
+    const parsed = JSON.parse(val);
+    return !!(parsed.iv && (parsed.r || parsed.s));
+  } catch {
+    return false;
+  }
+};
+
 export const decryptMessage = async (jsonCipher: string, privateKey: CryptoKey, isSender: boolean): Promise<string> => {
   try {
+    if (!jsonCipher || !isEncryptedPayload(jsonCipher)) return jsonCipher || "";
+    
     const data = JSON.parse(jsonCipher);
-    if (!data.iv || !data.c || (!data.r && !data.s)) throw new Error("Invalid cipher format");
-
     const iv = base64ToUint8Array(data.iv);
     const encryptedAesKeyB64 = isSender ? data.s : data.r;
-    const encryptedContent = base64ToUint8Array(data.c);
+    
+    if (!encryptedAesKeyB64) return "[Decryption key missing]";
+
+    const encryptedContent = base64ToUint8Array(data.c || "");
+    if (!data.c && data.m) {
+      // It's a file metadata only message, nothing to decrypt as "text"
+      return "";
+    }
 
     // 1. Decrypt AES key with RSA
     const decryptedAesKeyRaw = await window.crypto.subtle.decrypt(
@@ -190,6 +216,7 @@ export const decryptMessage = async (jsonCipher: string, privateKey: CryptoKey, 
     return "[Unable to decrypt message]";
   }
 };
+
 
 /**
  * Encrypts a file (Blob) for both sender and recipient

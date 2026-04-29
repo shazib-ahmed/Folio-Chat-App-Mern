@@ -73,7 +73,7 @@ export function ChatListItem({ chat, isActive, onClick }: ChatListItemProps) {
     >
       <div className="relative">
         <Avatar className="h-12 w-12">
-          <AvatarImage src={chat.avatar} alt={chat.name} />
+          <AvatarImage src={chat.avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${chat.username}`} alt={chat.name} />
           <AvatarFallback>{chat.name.substring(0, 2).toUpperCase()}</AvatarFallback>
         </Avatar>
         {chat.online && (

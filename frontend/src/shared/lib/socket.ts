@@ -30,7 +30,12 @@ const setupGlobalListeners = () => {
 	socket.on('userBlockStatus', (data: any) => {
 		subscribers.forEach(cb => cb(null, { ...data, type: 'userBlockStatus' }));
 	});
+
+	socket.on('chatRequestAccepted', (data: any) => {
+		subscribers.forEach(cb => cb(null, { ...data, type: 'chatRequestAccepted' }));
+	});
 };
+
 
 export const initiateSocketConnection = (userId: string | number) => {
 	socket = io(SOCKET_URL, {

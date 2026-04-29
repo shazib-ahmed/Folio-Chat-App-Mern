@@ -15,7 +15,7 @@ export function ProfileSettings() {
   const { user } = useSelector((state: RootState) => state.auth);
   const dispatch = useDispatch();
   const fileInputRef = React.useRef<HTMLInputElement>(null);
-  const [avatarPreview, setAvatarPreview] = React.useState(user?.avatar || "");
+  const [avatarPreview, setAvatarPreview] = React.useState(user?.avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user?.username || 'user'}`);
   const [selectedFile, setSelectedFile] = React.useState<File | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [success, setSuccess] = useState(false);
@@ -124,7 +124,7 @@ export function ProfileSettings() {
       <div className="flex flex-col items-center gap-4">
         <div className="relative group">
           <Avatar className="h-24 w-24 border-2 border-primary/20">
-            <AvatarImage src={avatarPreview} />
+            <AvatarImage src={avatarPreview || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user?.username || 'user'}`} />
             <AvatarFallback>{getInitials(user?.name)}</AvatarFallback>
           </Avatar>
           <button 

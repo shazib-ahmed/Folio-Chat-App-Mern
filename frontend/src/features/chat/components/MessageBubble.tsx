@@ -4,7 +4,8 @@ import { Message } from "../types";
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faCheckDouble, faFileLines, faDownload, faClock, faPlay, faPause, faMicrophone, faXmark } from '@fortawesome/free-solid-svg-icons';
 import { Button } from '@/shared/ui/button';
-import { decryptFile, getLocalPrivateKey, decryptMessage } from '@/shared/lib/cryptoUtils';
+import { decryptFile, getLocalPrivateKey, decryptMessage, isEncryptedPayload } from '@/shared/lib/cryptoUtils';
+
 import { Skeleton } from '@/shared/ui/skeleton';
 
 interface MessageBubbleProps {
@@ -93,36 +94,44 @@ const VoiceMessage = React.memo(({ url, isMe }: { url: string; isMe?: boolean })
   );
 });
 
+// Helpers to hide raw encrypted JSON strings from UI
+const sanitizeValue = (val?: string) => isEncryptedPayload(val) ? null : val;
+
 export const MessageBubble = React.memo(({ message, isMe }: MessageBubbleProps) => {
   const [isImageModalOpen, setIsImageModalOpen] = useState(false);
   const [decryptedUrl, setDecryptedUrl] = useState<string | null>(null);
   const [isDecrypting, setIsDecrypting] = useState(false);
   const [decryptedText, setDecryptedText] = useState<string | null>(null);
   const [decryptedMeta, setDecryptedMeta] = useState<{ fileName?: string; fileSize?: string }>({});
+  const [lastBlobUrl, setLastBlobUrl] = useState<string | null>(null);
   
-  // Sanitize helper to hide raw encrypted JSON strings from UI
-  const isJson = (val?: string) => val && val.startsWith('{') && val.endsWith('}');
-  const sanitizeValue = (val?: string) => isJson(val) ? null : val;
-
-  const activeUrl = decryptedUrl || sanitizeValue(message.fileUrl);
+  const activeUrl = decryptedUrl || sanitizeValue(message.fileUrl) || lastBlobUrl;
   const activeFileName = decryptedMeta.fileName || sanitizeValue(message.fileName);
   const activeFileSize = decryptedMeta.fileSize || sanitizeValue(message.fileSize);
-  const activeText = decryptedText || (isJson(message.text) ? 'Decrypting...' : message.text);
+  const activeText = decryptedText || (isEncryptedPayload(message.text) ? 'Decrypting...' : message.text);
 
   React.useEffect(() => {
+    // Preserve blob URLs for optimistic updates
+    if (message.fileUrl?.startsWith('blob:')) {
+      setLastBlobUrl(message.fileUrl);
+    }
+
+    let isMounted = true;
+    let currentBlobUrl: string | null = null;
+
     const handleDecrypt = async () => {
       if (message.isEncrypted) {
         setIsDecrypting(true);
         try {
           const privateKey = await getLocalPrivateKey();
-          if (!privateKey) return;
+          if (!privateKey || !isMounted) return;
 
           const isSender = isMe || false;
 
-          // 1. Decrypt text if it's JSON
-          if (typeof message.text === 'string' && message.text && isJson(message.text)) {
+          // 1. Decrypt text if it's an encrypted payload
+          if (message.text && isEncryptedPayload(message.text)) {
             const decrypted = await decryptMessage(message.text, privateKey, isSender);
-            setDecryptedText(decrypted);
+            if (isMounted) setDecryptedText(decrypted);
           }
 
           // 2. Decrypt file if exists
@@ -130,39 +139,50 @@ export const MessageBubble = React.memo(({ message, isMe }: MessageBubbleProps) 
             let realFileUrl = message.fileUrl;
             let realFileName = message.fileName || "";
 
-            // Decrypt fileUrl if it's JSON
-            if (isJson(message.fileUrl)) {
+            // Decrypt fileUrl if it's an encrypted payload
+            if (isEncryptedPayload(message.fileUrl)) {
               realFileUrl = await decryptMessage(message.fileUrl, privateKey, isSender);
             }
 
-            // Decrypt fileName if it's JSON
-            if (message.fileName && isJson(message.fileName)) {
+            // Decrypt fileName if it's an encrypted payload
+            if (message.fileName && isEncryptedPayload(message.fileName)) {
               realFileName = await decryptMessage(message.fileName, privateKey, isSender);
             }
 
-            if (realFileUrl && !realFileUrl.startsWith('[Unable')) {
+            if (realFileUrl && !realFileUrl.startsWith('[Unable') && isMounted) {
               const response = await fetch(realFileUrl);
               const encryptedBlob = await response.blob();
               const decrypted = await decryptFile(encryptedBlob, message.fileMeta, privateKey, isSender);
               
-              const url = window.URL.createObjectURL(decrypted.decryptedBlob);
-              setDecryptedUrl(url);
-              setDecryptedMeta({ 
-                fileName: decrypted.fileName || realFileName, 
-                fileSize: decrypted.fileSize 
-              });
+              if (isMounted) {
+                const url = window.URL.createObjectURL(decrypted.decryptedBlob);
+                currentBlobUrl = url;
+                setDecryptedUrl(url);
+                setDecryptedMeta({ 
+                  fileName: decrypted.fileName || realFileName, 
+                  fileSize: decrypted.fileSize 
+                });
+              }
             }
           }
         } catch (err) {
           console.error("Decryption failed:", err);
         } finally {
-          setIsDecrypting(false);
+          if (isMounted) setIsDecrypting(false);
         }
       }
     };
 
     handleDecrypt();
-  }, [message.fileUrl, message.fileMeta, message.text, message.fileName, message.isEncrypted, isMe]);
+
+    return () => {
+      isMounted = false;
+      if (currentBlobUrl) {
+        window.URL.revokeObjectURL(currentBlobUrl);
+      }
+    };
+  }, [message.fileUrl, message.fileMeta, message.text, message.fileName, message.fileSize, message.isEncrypted, isMe]);
+
 
   const handleDownload = async (e: React.MouseEvent, url: string, fileName: string) => {
     e.preventDefault();
@@ -222,24 +242,21 @@ export const MessageBubble = React.memo(({ message, isMe }: MessageBubbleProps) 
 
         {/* Media Attachments */}
         {message.messageType === 'IMAGE' && (
-          <div className="mb-2 rounded overflow-hidden max-w-[320px] relative min-h-[100px]">
-            {showLoading ? (
-              <div className="w-full h-[200px] bg-black/5 dark:bg-white/5 flex flex-col items-center justify-center gap-2">
-                <Skeleton className="w-full h-full absolute inset-0" />
-                <div className="relative z-10 flex flex-col items-center gap-2">
-                  <div className="w-5 h-5 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
-                  <span className="text-[10px] text-muted-foreground uppercase tracking-widest font-bold">
-                    {isPending ? 'Uploading' : 'Decrypting'}
-                  </span>
-                </div>
-              </div>
-            ) : activeUrl ? (
+          <div className="mb-2 rounded overflow-hidden max-w-[320px] relative min-h-[100px] w-full">
+            {activeUrl ? (
               <img 
                 src={activeUrl} 
                 alt="Sent" 
-                className="w-full h-auto max-h-[400px] object-cover cursor-pointer hover:opacity-95 transition-opacity"
+                className="w-full h-auto max-h-[400px] object-cover cursor-pointer hover:opacity-95 transition-opacity min-w-[200px]"
                 onClick={() => setIsImageModalOpen(true)}
               />
+            ) : showLoading ? (
+              <div className="w-[240px] h-[200px] bg-black/5 dark:bg-white/5 flex flex-col items-center justify-center gap-2 relative">
+                <Skeleton className="w-full h-full absolute inset-0" />
+                <div className="relative z-10">
+                  <div className="w-5 h-5 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
+                </div>
+              </div>
             ) : null}
           </div>
         )}
@@ -271,21 +288,23 @@ export const MessageBubble = React.memo(({ message, isMe }: MessageBubbleProps) 
 
         {message.messageType === 'VIDEO' && (
           <div className="mb-2 rounded overflow-hidden max-w-[320px] relative">
-            {showLoading ? (
-              <Skeleton className="w-full aspect-video" />
-            ) : activeUrl ? (
+            {activeUrl ? (
               <video 
                 src={activeUrl} 
                 controls 
                 className="w-full aspect-video rounded"
               />
+            ) : showLoading ? (
+              <Skeleton className="w-full aspect-video" />
             ) : null}
           </div>
         )}
 
         {message.messageType === 'AUDIO' && (
           <div className="relative">
-            {showLoading ? (
+            {activeUrl ? (
+              <VoiceMessage url={activeUrl} isMe={isMe} />
+            ) : showLoading ? (
               <div className="flex items-center gap-3 py-1 min-w-[220px]">
                 <Skeleton className="h-10 w-10 rounded-full" />
                 <div className="flex-1 space-y-2">
@@ -293,8 +312,6 @@ export const MessageBubble = React.memo(({ message, isMe }: MessageBubbleProps) 
                   <Skeleton className="h-2 w-20 rounded-full" />
                 </div>
               </div>
-            ) : activeUrl ? (
-              <VoiceMessage url={activeUrl} isMe={isMe} />
             ) : null}
           </div>
         )}
@@ -309,16 +326,16 @@ export const MessageBubble = React.memo(({ message, isMe }: MessageBubbleProps) 
               )}
             >
               <div className="w-9 h-9 bg-primary/20 rounded flex items-center justify-center shrink-0">
-                {showLoading ? (
+                {showLoading && !activeUrl ? (
                   <div className="w-4 h-4 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
                 ) : (
                   <FontAwesomeIcon icon={faFileLines} className="text-primary text-lg" />
                 )}
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-[11px] font-semibold truncate">{activeFileName || (showLoading ? 'Unlocking...' : 'Attachment')}</p>
+                <p className="text-[11px] font-semibold truncate">{activeFileName || 'Attachment'}</p>
                 <p className="text-[9px] opacity-60">
-                  {showLoading ? "Decrypting..." : (activeFileSize || 'Click to view/download')}
+                  {activeFileSize || 'Click to view/download'}
                 </p>
               </div>
               {!showLoading && activeUrl && (

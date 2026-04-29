@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import EmojiPicker, { Theme } from 'emoji-picker-react';
 import { Avatar, AvatarFallback, AvatarImage } from "@/shared/ui/avatar";
 import { Input } from "@/shared/ui/input";
@@ -10,7 +11,8 @@ import { Chat, Message } from "../types";
 import { cn } from "@/shared/lib/utils";
 
 import { getMessagesApi, sendMessageApi, markSeenApi, blockUserApi, unblockUserApi, acceptRequestApi, searchMessagesApi, getPublicKeyApi, uploadFileApi } from '../chatService';
-import { encryptForBoth, decryptMessage, getLocalPrivateKey, encryptFileForBoth } from '@/shared/lib/cryptoUtils';
+import { encryptForBoth, decryptMessage, getLocalPrivateKey, encryptFileForBoth, isEncryptedPayload } from '@/shared/lib/cryptoUtils';
+
 import { subscribeToMessages, getSocket } from '@/shared/lib/socket';
 import { useSelector, useDispatch } from 'react-redux';
 import { RootState, AppDispatch } from '@/app/store';
@@ -34,6 +36,7 @@ interface ChatWindowProps {
 
 export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWindowProps) {
   const { user: me } = useSelector((state: RootState) => state.auth);
+  const navigate = useNavigate();
   const [inputText, setInputText] = useState("");
   const [localMessages, setLocalMessages] = useState<Message[]>([]);
   const [isSearching, setIsSearching] = useState(false);
@@ -97,40 +100,64 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
       (getMessagesApi(chat.username) as Promise<any>).then(async data => {
         const privateKey = await getLocalPrivateKey();
         const decryptedMessages = await Promise.all((data.messages || []).map(async (msg: any) => {
+          if (!msg.isEncrypted || !privateKey) return msg;
+
           let decryptedText = msg.text;
+          let decryptedFileUrl = msg.fileUrl;
+          let decryptedFileName = msg.fileName;
           let fileMeta = "";
 
-          if (msg.isEncrypted && privateKey && msg.text) {
-            try {
-              let cipherText = msg.text;
-              try {
-                const parsed = JSON.parse(msg.text);
-                if (parsed.fileMeta) {
-                  cipherText = parsed.text || "";
-                  fileMeta = parsed.fileMeta;
-                } else if (parsed.iv && (parsed.r || parsed.s)) {
-                  cipherText = "";
-                  fileMeta = msg.text;
-                }
-              } catch (e) {
-                if (msg.messageType !== 'TEXT') {
-                  fileMeta = msg.text;
-                  cipherText = "";
-                }
-              }
+          const isSender = String(msg.senderId) === String(me?.id);
 
-              const isSender = String(msg.senderId) === String(me?.id);
-              if (cipherText && cipherText !== "[Unable to decrypt message]") {
-                decryptedText = await decryptMessage(cipherText, privateKey, isSender);
-              } else {
-                decryptedText = "";
+          // 1. Extract fileMeta and potentially decrypt text
+          if (msg.text && (isEncryptedPayload(msg.text) || msg.text.includes('"fileMeta"'))) {
+            try {
+              const parsed = JSON.parse(msg.text);
+              if (parsed.fileMeta) {
+                decryptedText = parsed.text ? await decryptMessage(parsed.text, privateKey, isSender) : "";
+                fileMeta = parsed.fileMeta;
+              } else if (parsed.iv) {
+                // If it has iv/r/s but no fileMeta, it's either text or just fileMeta
+                if (parsed.c) {
+                  decryptedText = await decryptMessage(msg.text, privateKey, isSender);
+                } else {
+                  fileMeta = msg.text;
+                  decryptedText = "";
+                }
               }
-            } catch (err) {
-              console.error('History decryption failed:', err);
+            } catch (e) {
+              console.error("History: Failed to parse message JSON:", e);
             }
           }
-          return { ...msg, text: decryptedText, fileMeta };
+
+
+          // 2. Decrypt fileUrl if it's an encrypted payload
+          if (msg.fileUrl && isEncryptedPayload(msg.fileUrl)) {
+            decryptedFileUrl = await decryptMessage(msg.fileUrl, privateKey, isSender);
+          }
+
+          // 3. Decrypt fileName if it's an encrypted payload
+          if (msg.fileName && isEncryptedPayload(msg.fileName)) {
+            decryptedFileName = await decryptMessage(msg.fileName, privateKey, isSender);
+          }
+
+          // 4. Decrypt fileSize if it's an encrypted payload
+          let decryptedFileSize = msg.fileSize;
+          if (msg.fileSize && isEncryptedPayload(msg.fileSize)) {
+            decryptedFileSize = await decryptMessage(msg.fileSize, privateKey, isSender);
+          }
+
+          return { 
+            ...msg, 
+            text: decryptedText, 
+            fileUrl: decryptedFileUrl, 
+            fileName: decryptedFileName, 
+            fileSize: decryptedFileSize,
+            fileMeta 
+          };
+
         }));
+
 
         setLocalMessages(decryptedMessages);
         setIsBlocked(data.isBlocked);
@@ -233,11 +260,13 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
       if (msg.type === 'chatRequestAccepted') {
         const activeChat = currentChatRef.current;
         console.log('Chat request accepted event received:', msg, 'Active chat:', activeChat?.id);
+        // If we are looking at the chat that was just accepted
         if (activeChat && (String(msg.acceptedBy) === String(activeChat.id))) {
           setChatStatus('ACCEPTED');
         }
         return;
       }
+
 
       if (msg.type === 'messagesSeen') {
         if (chat && msg.chatId === chat.id) {
@@ -265,47 +294,61 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
         
         const privateKey = await getLocalPrivateKey();
         let decryptedText = msg.text;
+        let decryptedFileUrl = msg.fileUrl;
+        let decryptedFileName = msg.fileName;
+        let decryptedFileSize = msg.fileSize;
         let fileMeta = "";
 
-        if (msg.isEncrypted && msg.text && privateKey) {
-          try {
-            let cipherText = msg.text;
-            // Check if it's the JSON format
+        if (msg.isEncrypted && privateKey) {
+          const isSender = String(msg.senderId) === String(me?.id);
+
+          // 1. Text & fileMeta
+          if (msg.text && (isEncryptedPayload(msg.text) || msg.text.includes('"fileMeta"'))) {
             try {
               const parsed = JSON.parse(msg.text);
               if (parsed.fileMeta) {
-                // Wrapped format: { text: "...", fileMeta: "..." }
-                cipherText = parsed.text || "";
+                decryptedText = parsed.text ? await decryptMessage(parsed.text, privateKey, isSender) : "";
                 fileMeta = parsed.fileMeta;
-              } else if (parsed.iv && (parsed.r || parsed.s)) {
-                // Direct metadata format: { r: "...", s: "...", iv: "..." }
-                cipherText = "";
-                fileMeta = msg.text;
+              } else if (parsed.iv) {
+                if (parsed.c) {
+                  decryptedText = await decryptMessage(msg.text, privateKey, isSender);
+                } else {
+                  fileMeta = msg.text;
+                  decryptedText = "";
+                }
               }
             } catch (e) {
-              // Not JSON: treat as plain encrypted text or fallback for files
-              if (msg.messageType !== 'TEXT') {
-                fileMeta = msg.text;
-                cipherText = "";
-              }
+              console.error("Socket: Failed to parse message JSON:", e);
             }
+          }
 
-            const isSender = String(msg.senderId) === String(me?.id);
-            if (cipherText && cipherText !== "[Unable to decrypt message]") {
-              decryptedText = await decryptMessage(cipherText, privateKey, isSender);
-            } else {
-              decryptedText = "";
-            }
-          } catch (err) {
-            console.error('Real-time decryption failed:', err);
+
+          // 2. fileUrl
+          if (msg.fileUrl && isEncryptedPayload(msg.fileUrl)) {
+            decryptedFileUrl = await decryptMessage(msg.fileUrl, privateKey, isSender);
+          }
+
+          // 3. fileName
+          if (msg.fileName && isEncryptedPayload(msg.fileName)) {
+            decryptedFileName = await decryptMessage(msg.fileName, privateKey, isSender);
+          }
+
+          // 4. fileSize
+          if (msg.fileSize && isEncryptedPayload(msg.fileSize)) {
+            decryptedFileSize = await decryptMessage(msg.fileSize, privateKey, isSender);
           }
         }
 
         const decryptedMsg = { 
           ...msg,
           text: decryptedText,
-          fileMeta // Attach fileMeta for MessageBubble to use
+          fileUrl: decryptedFileUrl,
+          fileName: decryptedFileName,
+          fileSize: decryptedFileSize,
+          fileMeta 
         };
+
+
 
         setLocalMessages(prev => {
           const isMine = String(msg.senderId) === String(me?.id);
@@ -319,8 +362,12 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
               // Ensure we don't overwrite with empty text if decryption failed
               const finalMsg = {
                 ...decryptedMsg,
-                text: decryptedMsg.text || prev[tempIndex].text
+                text: decryptedMsg.text || prev[tempIndex].text,
+                fileUrl: prev[tempIndex].fileUrl && prev[tempIndex].fileUrl.startsWith('blob:') ? prev[tempIndex].fileUrl : decryptedMsg.fileUrl,
+                fileName: prev[tempIndex].fileName && !isEncryptedPayload(prev[tempIndex].fileName) ? prev[tempIndex].fileName : decryptedMsg.fileName,
+                fileSize: prev[tempIndex].fileSize && !isEncryptedPayload(prev[tempIndex].fileSize) ? prev[tempIndex].fileSize : decryptedMsg.fileSize
               };
+
               newMsgs[tempIndex] = finalMsg;
               return newMsgs;
             }
@@ -334,7 +381,13 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
             if (tempIndex !== -1) {
               const actualIndex = prev.length - 1 - tempIndex;
               const newMsgs = [...prev];
-              newMsgs[actualIndex] = { ...decryptedMsg, text: decryptedMsg.text || prev[actualIndex].text };
+              newMsgs[actualIndex] = { 
+                ...decryptedMsg, 
+                text: decryptedMsg.text || prev[actualIndex].text,
+                fileUrl: prev[actualIndex].fileUrl, // PRESERVE LOCAL URL
+                fileName: prev[actualIndex].fileName,
+                fileSize: prev[actualIndex].fileSize
+              };
               return newMsgs;
             }
           }
@@ -459,21 +512,23 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
           const uploadRes = await uploadFileApi(new File([encryptedBlob], "encrypted-file", { type: lastFile.type }));
           const encryptedFileUrl = await encryptForBoth(uploadRes.fileUrl, recipientPublicKey, myPublicKey);
           const encryptedFileName = await encryptForBoth(originalName, recipientPublicKey, myPublicKey);
+          const encryptedFileSize = await encryptForBoth(originalSize, recipientPublicKey, myPublicKey);
           
           fileMetadata = encryptedMetadata;
           const payload = lastInput.trim() ? JSON.stringify({ text: finalMessage, fileMeta: fileMetadata }) : fileMetadata;
           
-          const response = await sendMessageApi(chat.id, payload, mappedType, undefined, true, clientMsgId, encryptedFileUrl, encryptedFileName, originalSize);
-          setLocalMessages(prev => prev.map(m => m.id === clientMsgId ? { ...response, text: lastInput } : m));
+          const response = await sendMessageApi(chat.id, payload, mappedType, undefined, true, clientMsgId, encryptedFileUrl, encryptedFileName, encryptedFileSize);
+          setLocalMessages(prev => prev.map(m => m.id === clientMsgId ? { ...response, text: lastInput, fileUrl: currentPreview, fileName: originalName, fileSize: originalSize } : m));
         } else {
           // Text only
           const response = await sendMessageApi(chat.id, finalMessage, 'TEXT', undefined, true, clientMsgId);
           setLocalMessages(prev => prev.map(m => m.id === clientMsgId ? { ...response, text: lastInput } : m));
         }
+
       } else {
         // --- PLAIN FLOW ---
         const response = await sendMessageApi(chat.id, lastInput, mappedType, lastFile, false, clientMsgId);
-        setLocalMessages(prev => prev.map(m => m.id === clientMsgId ? response : m));
+        setLocalMessages(prev => prev.map(m => m.id === clientMsgId ? { ...response, fileUrl: currentPreview, fileName: originalName, fileSize: originalSize } : m));
       }
     } catch (err: any) {
       console.error('Send failed:', err);
@@ -819,33 +874,19 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
         ) : (
           <>
             <div className="flex items-center gap-1">
-              {!isLoadingMessages && (
-                <>
-                  <Button 
-                    variant="ghost" 
-                    size="icon" 
-                    className="h-9 w-9 rounded-full text-muted-foreground hover:text-primary hover:bg-primary/10 transition-all disabled:opacity-30"
-                    onClick={() => chat && onStartAudioCall?.(chat)}
-                    disabled={isBlocked || chatStatus === 'PENDING'}
-                  >
-                    <FontAwesomeIcon icon={faPhone} className="h-4 w-4" />
-                  </Button>
-                  <Button 
-                    variant="ghost" 
-                    size="icon" 
-                    className="h-9 w-9 rounded-full text-muted-foreground hover:text-primary hover:bg-primary/10 transition-all disabled:opacity-30"
-                    onClick={() => chat && onStartVideoCall?.(chat)}
-                    disabled={isBlocked || chatStatus === 'PENDING'}
-                  >
-                    <FontAwesomeIcon icon={faVideo} className="h-4 w-4" />
-                  </Button>
-                  <div className="w-px h-4 bg-border/60 mx-1" />
-                </>
-              )}
+              <Button 
+                variant="ghost" 
+                size="icon" 
+                className="h-9 w-9 rounded-full text-muted-foreground hover:text-primary hover:bg-primary/10 transition-all mr-1"
+                onClick={() => navigate('/')}
+              >
+                <FontAwesomeIcon icon={faArrowLeft} className="h-4 w-4" />
+              </Button>
               <Avatar className="h-10 w-10">
-                <AvatarImage src={chat.avatar} />
+                <AvatarImage src={chat.avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${chat.username}`} />
                 <AvatarFallback>{chat.name.substring(0, 2).toUpperCase()}</AvatarFallback>
               </Avatar>
+
               <div>
                 <h4 className="text-sm font-semibold">{chat.name}</h4>
                 {isTyping ? (

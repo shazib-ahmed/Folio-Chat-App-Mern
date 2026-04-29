@@ -173,7 +173,7 @@ function ChatLayout() {
             id: user.id.toString(),
             name: user.name || user.username,
             username: user.username,
-            avatar: user.avatar || '',
+            avatar: user.avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.username}`,
             online: user.isOnline,
             unreadCount: 0
           });
