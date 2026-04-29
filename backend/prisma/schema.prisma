@@ -133,6 +133,7 @@ enum MessageType {
   FILE
   AUDIO
   VIDEO
+  CALL
 }
 
 enum MessageStatus {

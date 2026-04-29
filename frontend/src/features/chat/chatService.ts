@@ -28,7 +28,7 @@ export const uploadFileApi = async (file: File) => {
 export const sendMessageApi = async (
   receiverId: string, 
   content: string, 
-  type: 'TEXT' | 'IMAGE' | 'VIDEO' | 'AUDIO' | 'FILE', 
+  type: 'TEXT' | 'IMAGE' | 'VIDEO' | 'AUDIO' | 'FILE' | 'CALL', 
   file?: File, 
   isEncrypted: boolean = false, 
   clientMsgId?: string,

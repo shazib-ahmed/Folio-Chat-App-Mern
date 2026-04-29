@@ -341,6 +341,7 @@ export class ChatService {
     if (msg.messageType === 'IMAGE') return prefix + '📷 Photo';
     if (msg.messageType === 'VIDEO') return prefix + '🎥 Video';
     if (msg.messageType === 'AUDIO') return prefix + '🎵 Audio';
+    if (msg.messageType === 'CALL') return prefix + '📞 Call Log';
     if (msg.messageType === 'FILE') {
       const fileName = msg.fileName || '';
       if (fileName.toLowerCase().endsWith('.pdf')) return prefix + '📄 PDF Document';

@@ -150,4 +150,41 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   broadcastToUsers(userIds: number[], event: string, payload: any) {
     userIds.forEach((id) => this.sendMessageToUser(id, event, payload));
   }
+
+  // --- WebRTC Signaling ---
+
+  @SubscribeMessage('call:request')
+  handleCallRequest(@MessageBody() data: { to: number; from: number; fromName: string; fromAvatar?: string; type: 'audio' | 'video' }) {
+    console.log(`Call request from ${data.from} to ${data.to}`);
+    this.sendMessageToUser(data.to, 'call:request', data);
+  }
+
+  @SubscribeMessage('call:offer')
+  handleCallOffer(@MessageBody() data: { to: number; offer: any; from: number }) {
+    console.log(`Call offer from ${data.from} to ${data.to}`);
+    this.sendMessageToUser(data.to, 'call:offer', data);
+  }
+
+  @SubscribeMessage('call:answer')
+  handleCallAnswer(@MessageBody() data: { to: number; answer: any; from: number }) {
+    console.log(`Call answer from ${data.from} to ${data.to}`);
+    this.sendMessageToUser(data.to, 'call:answer', data);
+  }
+
+  @SubscribeMessage('call:ice-candidate')
+  handleIceCandidate(@MessageBody() data: { to: number; candidate: any; from: number }) {
+    this.sendMessageToUser(data.to, 'call:ice-candidate', data);
+  }
+
+  @SubscribeMessage('call:reject')
+  handleCallReject(@MessageBody() data: { to: number; from: number }) {
+    console.log(`Call rejected by ${data.from}, notifying ${data.to}`);
+    this.sendMessageToUser(data.to, 'call:reject', data);
+  }
+
+  @SubscribeMessage('call:end')
+  handleCallEnd(@MessageBody() data: { to: number; from: number }) {
+    console.log(`Call ended by ${data.from}, notifying ${data.to}`);
+    this.sendMessageToUser(data.to, 'call:end', data);
+  }
 }

@@ -6,6 +6,8 @@ import { Input } from "@/shared/ui/input";
 import { Button } from "@/shared/ui/button";
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faBan, faSearch, faFaceSmile, faPaperclip, faMicrophone, faPaperPlane, faArrowLeft, faPhone, faVideo, faXmark, faChevronDown, faTrash, faUnlock, faPen, faShare, faSpinner, faReply } from '@fortawesome/free-solid-svg-icons';
+import { useWebRTC } from '../hooks/useWebRTC';
+import { CallOverlay } from './CallOverlay';
 import { MessageBubble } from "./MessageBubble";
 import { Chat, Message } from "../types";
 import { cn } from "@/shared/lib/utils";
@@ -88,6 +90,91 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
   const recordingTimerRef = useRef<NodeJS.Timeout | null>(null);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  const {
+    callState,
+    remoteStream,
+    isMuted,
+    partner: callPartner,
+    startCall,
+    acceptCall,
+    rejectCall,
+    endCall,
+    toggleMute
+  } = useWebRTC({
+    currentUserId: String(me?.id || ''),
+    currentUserName: me?.name || me?.username || 'User',
+    currentUserAvatar: me?.avatar,
+    onIncomingCall: (data) => {
+      console.log('Incoming call from:', data.fromName);
+    },
+    onCallAccepted: () => {
+      console.log('Call accepted');
+    },
+    onCallEnded: () => {
+      console.log('Call ended');
+    },
+    onLogCall: async (type, duration) => {
+      if (!chat || !me) return;
+
+      let plainText = '';
+      if (type === 'MISSED') plainText = 'Missed audio call';
+      else if (type === 'REJECTED') plainText = 'Declined audio call';
+      else if (type === 'ENDED') {
+        const mins = Math.floor((duration || 0) / 60);
+        const secs = (duration || 0) % 60;
+        plainText = `Audio call (${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')})`;
+      }
+
+      const clientMsgId = `log-${Date.now()}`;
+      
+      // Optimistic update
+      const optimisticLog: Message = {
+        id: clientMsgId,
+        senderId: String(me.id),
+        text: plainText,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        status: 'pending' as any,
+        messageType: 'CALL',
+        isEncrypted: true
+      };
+      setLocalMessages(prev => [...prev, optimisticLog]);
+
+      try {
+        const [recipientPubKey, myPubKey] = await Promise.all([
+          getPublicKeyApi(chat.username),
+          getPublicKeyApi(me.username)
+        ]);
+
+        let encryptedText = plainText;
+        if (recipientPubKey && myPubKey) {
+          encryptedText = await encryptForBoth(plainText, recipientPubKey, myPubKey);
+        }
+
+        await sendMessageApi(
+          chat.id, 
+          encryptedText, 
+          'CALL', 
+          undefined, 
+          !!(recipientPubKey && myPubKey),
+          clientMsgId
+        );
+      } catch (err) {
+        console.error('Failed to log call:', err);
+        setLocalMessages(prev => prev.filter(m => m.id !== clientMsgId));
+      }
+    }
+  });
+
+  // Attach remote stream to audio element
+  useEffect(() => {
+    if (remoteStream) {
+      const audioEl = document.getElementById('remoteAudio') as HTMLAudioElement;
+      if (audioEl) {
+        audioEl.srcObject = remoteStream;
+      }
+    }
+  }, [remoteStream]);
 
   useEffect(() => {
     if (localMessages.length > 0 && !isLoadingMessages && !isFetchingMore) {
@@ -1231,7 +1318,15 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
                 <FontAwesomeIcon
                   icon={faPhone}
                   className={cn("h-4 w-4 cursor-pointer hover:text-foreground", isBlocked && "opacity-20 cursor-not-allowed")}
-                  onClick={() => !isBlocked && chat && onStartAudioCall?.(chat)}
+                  onClick={() => {
+                    if (!isBlocked && chat) {
+                      startCall({
+                        id: chat.id.toString(),
+                        name: chat.name,
+                        avatar: chat.avatar
+                      });
+                    }
+                  }}
                 />
                 <FontAwesomeIcon
                   icon={faSearch}
@@ -1733,6 +1828,17 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
         ref={fileInputRef}
         className="hidden"
         onChange={handleFileSelect}
+      />
+
+      {/* Call UI */}
+      <CallOverlay
+        state={callState as any}
+        partner={callPartner}
+        isMuted={isMuted}
+        onAccept={acceptCall}
+        onReject={rejectCall}
+        onEnd={endCall}
+        onToggleMute={toggleMute}
       />
     </div>
   );

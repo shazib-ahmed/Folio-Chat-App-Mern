@@ -16,7 +16,7 @@ export interface Message {
   fileSize?: string;
   timestamp: string;
   status: 'sent' | 'delivered' | 'read' | 'UNSEEN' | 'SEEN' | 'pending';
-  messageType?: 'TEXT' | 'IMAGE' | 'VIDEO' | 'AUDIO' | 'FILE';
+  messageType?: 'TEXT' | 'IMAGE' | 'VIDEO' | 'AUDIO' | 'FILE' | 'CALL';
   attachment?: {
     type: 'image' | 'video' | 'file' | 'audio';
     url: string;
@@ -34,7 +34,7 @@ export interface Message {
     id: string;
     senderId: string;
     text?: string;
-    messageType?: 'TEXT' | 'IMAGE' | 'VIDEO' | 'AUDIO' | 'FILE';
+    messageType?: 'TEXT' | 'IMAGE' | 'VIDEO' | 'AUDIO' | 'FILE' | 'CALL';
     isEncrypted?: boolean;
   };
   reactions?: {
@@ -53,7 +53,7 @@ export interface Chat {
   lastMessage?: string;
   lastMessageId?: string;
   lastMessageSenderId?: string;
-  lastMessageType?: 'TEXT' | 'IMAGE' | 'VIDEO' | 'AUDIO' | 'FILE';
+  lastMessageType?: 'TEXT' | 'IMAGE' | 'VIDEO' | 'AUDIO' | 'FILE' | 'CALL';
   isEncrypted?: boolean;
   isForwarded?: boolean;
   lastMessageTime?: string;

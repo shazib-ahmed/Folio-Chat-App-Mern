@@ -2,7 +2,7 @@ import React, { useState, useRef } from 'react';
 import { cn } from "@/shared/lib/utils";
 import { Message } from "../types";
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faCheckDouble, faFileLines, faDownload, faClock, faPlay, faPause, faMicrophone, faXmark, faPen, faEllipsisVertical, faTrash, faShare, faReply, faFaceSmile } from '@fortawesome/free-solid-svg-icons';
+import { faCheckDouble, faFileLines, faDownload, faClock, faPlay, faPause, faMicrophone, faXmark, faPen, faEllipsisVertical, faTrash, faShare, faReply, faFaceSmile, faPhone } from '@fortawesome/free-solid-svg-icons';
 import { Button } from '@/shared/ui/button';
 import {
   DropdownMenu,
@@ -516,6 +516,26 @@ export const MessageBubble = React.memo(({ message, isMe, onEdit, onDelete, onFo
                   {!showLoading && activeUrl && (
                     <FontAwesomeIcon icon={faDownload} className="text-[10px] opacity-40 group-hover:opacity-100 transition-opacity" />
                   )}
+                </div>
+              </div>
+            )}
+
+            {/* Call Logs */}
+            {message.messageType === 'CALL' && (
+              <div className="flex items-center gap-3 py-1 min-w-[180px]">
+                <div className={cn(
+                  "w-9 h-9 rounded-full flex items-center justify-center shrink-0",
+                  activeText?.toLowerCase().includes('missed') || activeText?.toLowerCase().includes('declined') 
+                    ? "bg-red-500/15 text-red-500" 
+                    : "bg-green-500/15 text-green-500"
+                )}>
+                  <FontAwesomeIcon icon={faPhone} className="text-sm" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-[11px] font-semibold truncate">{activeText || 'Audio call'}</p>
+                  <p className="text-[9px] opacity-60 font-medium">
+                    {activeText?.toLowerCase().includes('missed') ? 'Missed Call' : (activeText?.toLowerCase().includes('declined') ? 'Declined Call' : 'Voice Call')}
+                  </p>
                 </div>
               </div>
             )}
