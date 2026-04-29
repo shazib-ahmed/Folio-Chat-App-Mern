@@ -318,7 +318,7 @@ export const MessageBubble = React.memo(({ message, isMe, onEdit, onDelete, onFo
         "max-w-[85%] px-3 py-2 rounded-lg text-sm relative shadow-sm",
         isDeleting && "opacity-70 grayscale",
         message.isDeleted
-          ? (isMe ? "bg-muted/30 text-muted-foreground italic border border-muted" : "bg-muted/30 text-muted-foreground italic border border-muted")
+          ? "bg-red-500/5 text-red-500/80 italic border border-red-500/20 shadow-none"
           : (isMe
             ? "bg-[hsl(var(--bubble-me))] text-primary-foreground rounded-tr-none"
             : "bg-[hsl(var(--bubble-other))] text-foreground rounded-tl-none border border-border/40")
@@ -326,8 +326,8 @@ export const MessageBubble = React.memo(({ message, isMe, onEdit, onDelete, onFo
         {/* Deleted Message Placeholder */}
         {message.isDeleted ? (
           <div className="flex items-center gap-2 py-1 min-w-[200px]">
-            <FontAwesomeIcon icon={faTrash} className="h-3 w-3 opacity-40" />
-            <span className="text-[11px]">
+            <FontAwesomeIcon icon={faTrash} className="h-3 w-3 text-red-500/40" />
+            <span className="text-[11px] font-medium">
               {message.isForwarded
                 ? "Content unavailable"
                 : (isMe ? "You deleted a message" : `${otherName || 'User'} deleted a message`)}

@@ -1628,7 +1628,7 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
                             }).catch(err => console.error('Failed to mark as seen:', err));
                           }
                         }}
-                        className="flex-1 bg-background border-none focus-visible:ring-1 focus-visible:ring-primary/20 h-10 px-4 rounded-full"
+                        className="flex-1 bg-background border border-primary/20 focus-visible:ring-1 focus-visible:ring-primary/30 h-10 px-4 rounded-full transition-all"
                       />
 
                       <Button
