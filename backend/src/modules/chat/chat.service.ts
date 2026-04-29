@@ -32,9 +32,10 @@ export class ChatService {
     providedFileUrl?: string,
     providedFileName?: string,
     providedFileSize?: string,
-    isForwarded: boolean = false
+    isForwarded: boolean = false,
+    sourceMessageId?: number
   ) {
-    console.log('DEBUG: sendMessage incoming:', { isEncrypted, providedFileUrl: !!providedFileUrl, providedFileName: !!providedFileName });
+    console.log('DEBUG: sendMessage incoming:', { isEncrypted, isForwarded, sourceMessageId });
     
     let fileUrl: string | null = providedFileUrl || null;
     let fileName: string | null = providedFileName || null;
@@ -61,6 +62,7 @@ export class ChatService {
         chatRoomId: chatRoom.id,
         isEncrypted,
         isForwarded,
+        sourceMessageId
       },
       include: {
         sender: true,
@@ -291,7 +293,9 @@ export class ChatService {
   }
 
   private formatLastMessage(msg: any): string {
-    if (msg.deletedAt) return '🚫 deleted a message';
+    if (msg.deletedAt) {
+      return msg.isForwarded ? '🚫 Content unavailable' : '🚫 deleted a message';
+    }
     const isForwarded = msg.isForwarded === true || msg.isForwarded === 'true';
     const prefix = isForwarded ? '↗️ Forwarded: ' : '';
     console.log(`DEBUG: formatLastMessage msgId=${msg.id}, isForwarded=${msg.isForwarded}, prefix='${prefix}'`);
@@ -583,6 +587,40 @@ export class ChatService {
         where: { id: messageId },
         data: { deletedAt: new Date() }
       });
+      
+      // Recursive function to delete message and all its forwards
+      const deleteRecursive = async (msgId: number) => {
+        // Find all immediate forwards
+        const forwards = await this.prisma.message.findMany({
+          where: { sourceMessageId: msgId },
+          select: { id: true, senderId: true, receiverId: true }
+        });
+
+        // Delete them and notify
+        for (const forward of forwards) {
+          await this.prisma.message.update({
+            where: { id: forward.id },
+            data: { deletedAt: new Date() }
+          });
+
+          const forwardPayload = {
+            id: forward.id.toString(),
+            senderId: forward.senderId.toString(),
+            receiverId: forward.receiverId.toString(),
+            isDeleted: true,
+            isEncrypted: false,
+            sidebarText: '🚫 Content unavailable'
+          };
+          this.chatGateway.sendMessageToUser(forward.receiverId, 'messageDeleted', forwardPayload);
+          this.chatGateway.sendMessageToUser(forward.senderId, 'messageDeleted', forwardPayload);
+
+          // Recurse for the children of this forward
+          await deleteRecursive(forward.id);
+        }
+      };
+
+      // Start recursion from the current message
+      await deleteRecursive(messageId);
 
       const socketPayload = {
         id: messageId.toString(),

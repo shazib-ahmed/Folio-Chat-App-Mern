@@ -804,7 +804,8 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
         fileUrl,
         fileName,
         fileSize,
-        true // isForwarded
+        true, // isForwarded
+        msg.id.toString()
       );
 
       setIsForwardModalOpen(false);

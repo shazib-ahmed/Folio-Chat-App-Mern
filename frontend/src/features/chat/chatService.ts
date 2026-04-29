@@ -35,7 +35,8 @@ export const sendMessageApi = async (
   fileUrl?: string,
   fileName?: string,
   fileSize?: string,
-  isForwarded: boolean = false
+  isForwarded: boolean = false,
+  sourceMessageId?: string
 ) => {
   const formData = new FormData();
   formData.append('receiverId', receiverId);
@@ -48,6 +49,7 @@ export const sendMessageApi = async (
   if (fileName) formData.append('fileName', fileName);
   if (fileSize) formData.append('fileSize', fileSize);
   formData.append('isForwarded', String(isForwarded));
+  if (sourceMessageId) formData.append('sourceMessageId', sourceMessageId);
   
   const response = await api.post('/chat/send', formData, {
     headers: { 'Content-Type': 'multipart/form-data' }

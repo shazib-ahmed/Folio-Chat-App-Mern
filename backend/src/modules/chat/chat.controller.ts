@@ -36,8 +36,8 @@ export class ChatController {
     @Body() body: any,
     @UploadedFile() file?: Express.Multer.File,
   ) {
-    const { receiverId, message, type, isEncrypted, clientMsgId, fileUrl, fileName, fileSize, isForwarded } = body;
-    console.log('DEBUG: sendMessage body:', { receiverId, type, isEncrypted, fileUrl: !!fileUrl, fileName: !!fileName, isForwarded });
+    const { receiverId, message, type, isEncrypted, clientMsgId, fileUrl, fileName, fileSize, isForwarded, sourceMessageId } = body;
+    console.log('DEBUG: sendMessage body:', { receiverId, type, isEncrypted, fileUrl: !!fileUrl, fileName: !!fileName, isForwarded, sourceMessageId });
     
     const user = req.user as any;
     return this.chatService.sendMessage(
@@ -51,7 +51,8 @@ export class ChatController {
       fileUrl,
       fileName,
       fileSize,
-      String(isForwarded) === 'true' || isForwarded === true
+      String(isForwarded) === 'true' || isForwarded === true,
+      sourceMessageId ? Number(sourceMessageId) : undefined
     );
   }
 

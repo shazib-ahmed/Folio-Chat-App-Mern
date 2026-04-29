@@ -272,7 +272,9 @@ export const MessageBubble = React.memo(({ message, isMe, onEdit, onDelete, onFo
           <div className="flex items-center gap-2 py-1 min-w-[200px]">
             <FontAwesomeIcon icon={faTrash} className="h-3 w-3 opacity-40" />
             <span className="text-[11px]">
-              {isMe ? "You deleted a message" : `${otherName || 'User'} deleted a message`}
+              {message.isForwarded 
+                ? "Content unavailable" 
+                : (isMe ? "You deleted a message" : `${otherName || 'User'} deleted a message`)}
             </span>
             {isDeleting && (
               <div className="w-3 h-3 border-2 border-primary/30 border-t-primary rounded-full animate-spin ml-auto" />

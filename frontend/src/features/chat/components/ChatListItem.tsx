@@ -45,17 +45,23 @@ export function ChatListItem({ chat, isActive, onClick }: ChatListItemProps) {
             try {
               const parsed = JSON.parse(cipherText);
               
-              // 1. If it has 'c' or 'text', it's a decryptable text message
-              if (parsed.c || parsed.text) {
+              // 1. If it has 'c' OR a top-level 'text' with 'iv', it's a standard decryptable text message
+              if (parsed.c || (parsed.text && parsed.iv)) {
                 // Do nothing here, it will fall through to decryptMessage(cipherText, ...)
-                // and we ensure it doesn't enter the 'else if' below
               } 
               // 2. If it has 'm' or 'fileMeta', it's a file attachment
-              else if (parsed.m || parsed.fileMeta || (parsed.iv && (parsed.r || parsed.s))) {
+              if (parsed.m || parsed.fileMeta) {
                 const typeLabels: any = { 'IMAGE': '📷 Photo', 'VIDEO': '🎥 Video', 'AUDIO': '🎵 Audio', 'FILE': '📄 File' };
                 const label = typeLabels[chat.lastMessageType || ''] || '📄 Attachment'; 
+                
+                // If it also has text, we might want to decrypt that instead of just showing the label
+                // but for sidebar, the label is usually better.
                 setDisplayText((isSender ? "You: " : "") + forwardPrefix + label);
                 return;
+              }
+              // 3. Fallback for generic encrypted JSON
+              else if (parsed.iv && (parsed.r || parsed.s)) {
+                // falls through to decryptMessage
               }
             } catch (e) {
               // Not JSON
@@ -76,8 +82,10 @@ export function ChatListItem({ chat, isActive, onClick }: ChatListItemProps) {
         let msg = chat.lastMessage || "";
         
         // Custom handling for deleted messages in sidebar
-        if (msg.includes('🚫') || msg.toLowerCase().includes('deleted a message') || msg.toLowerCase().includes('message deleted')) {
-          const text = isSender ? "You deleted a message" : `${chat.name} deleted a message`;
+        if (msg.includes('🚫') || msg.toLowerCase().includes('deleted a message') || msg.toLowerCase().includes('message deleted') || msg.toLowerCase().includes('content unavailable')) {
+          const text = chat.isForwarded 
+            ? "Content unavailable" 
+            : (isSender ? "You deleted a message" : `${chat.name} deleted a message`);
           setDisplayText(text);
           return;
         }
