@@ -33,6 +33,7 @@ model User {
   receivedMessages Message[] @relation("ReceivedMessages")
   blockedUsers     Block[]   @relation("Blocker")
   blockedBy        Block[]   @relation("Blocked")
+  reactions        MessageReaction[]
 }
 
 model Otp {
@@ -92,8 +93,23 @@ model Message {
   forwards       Message[]   @relation("ForwardRelation")
   replyTo        Message?    @relation("ReplyRelation", fields: [replyToId], references: [id])
   replies        Message[]   @relation("ReplyRelation")
+  reactions      MessageReaction[]
 
   @@index([chatRoomId, id])
+}
+
+model MessageReaction {
+  id        Int      @id @default(autoincrement())
+  messageId Int
+  userId    Int
+  emoji     String
+  
+  createdAt DateTime @default(now())
+  
+  message   Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id])
+
+  @@unique([messageId, userId])
 }
 
 model Block {

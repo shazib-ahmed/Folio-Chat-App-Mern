@@ -42,6 +42,10 @@ const setupGlobalListeners = () => {
 	socket.on('messageDeleted', (data: any) => {
 		subscribers.forEach(cb => cb(null, { ...data, type: 'messageDeleted' }));
 	});
+
+	socket.on('messageReaction', (data: any) => {
+		subscribers.forEach(cb => cb(null, { ...data, type: 'messageReaction' }));
+	});
 };
 
 

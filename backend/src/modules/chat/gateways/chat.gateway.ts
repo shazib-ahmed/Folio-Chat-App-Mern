@@ -9,6 +9,8 @@ import {
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
 import { PrismaService } from 'src/database/prisma.service';
+import { forwardRef, Inject } from '@nestjs/common';
+import { ChatService } from '../chat.service';
 
 @WebSocketGateway({
   cors: {
@@ -19,7 +21,11 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
   server: Server;
 
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    @Inject(forwardRef(() => ChatService))
+    private chatService: ChatService
+  ) {}
 
   // Map to track connected users: userId -> Set of socketIds
   private connectedUsers: Map<number, Set<string>> = new Map();
@@ -133,6 +139,12 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   handleStopTyping(@MessageBody() data: { senderId: number; receiverId: number }, @ConnectedSocket() client: Socket) {
     console.log(`User ${data.senderId} stopped typing to ${data.receiverId}`);
     this.sendMessageToUser(data.receiverId, 'stopTyping', { senderId: data.senderId });
+  }
+
+  @SubscribeMessage('react')
+  async handleReact(@MessageBody() data: { userId: number; messageId: number; emoji: string }, @ConnectedSocket() client: Socket) {
+    console.log(`User ${data.userId} reacted with ${data.emoji} to message ${data.messageId}`);
+    return await this.chatService.addReaction(data.userId, data.messageId, data.emoji);
   }
 
   broadcastToUsers(userIds: number[], event: string, payload: any) {

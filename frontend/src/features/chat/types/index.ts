@@ -37,6 +37,10 @@ export interface Message {
     messageType?: 'TEXT' | 'IMAGE' | 'VIDEO' | 'AUDIO' | 'FILE';
     isEncrypted?: boolean;
   };
+  reactions?: {
+    userId: string;
+    emoji: string;
+  }[];
 }
 
 

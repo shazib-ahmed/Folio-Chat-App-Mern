@@ -2,7 +2,7 @@ import React, { useState, useRef } from 'react';
 import { cn } from "@/shared/lib/utils";
 import { Message } from "../types";
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faCheckDouble, faFileLines, faDownload, faClock, faPlay, faPause, faMicrophone, faXmark, faPen, faEllipsisVertical, faTrash, faShare, faReply } from '@fortawesome/free-solid-svg-icons';
+import { faCheckDouble, faFileLines, faDownload, faClock, faPlay, faPause, faMicrophone, faXmark, faPen, faEllipsisVertical, faTrash, faShare, faReply, faFaceSmile } from '@fortawesome/free-solid-svg-icons';
 import { Button } from '@/shared/ui/button';
 import {
   DropdownMenu,
@@ -24,9 +24,12 @@ interface MessageBubbleProps {
   onForward?: (message: Message) => void;
   onReply?: (message: Message) => void;
   onScrollTo?: (messageId: string) => void;
+  onReact?: (messageId: string, emoji: string) => void;
   otherName?: string;
   isDeleting?: boolean;
 }
+
+const COMMON_EMOJIS = ['👍', '❤️', '😂', '😮', '😢', '😡', '🙏'];
 
 const VoiceMessage = React.memo(({ url, isMe }: { url: string; isMe?: boolean }) => {
   const [isPlaying, setIsPlaying] = useState(false);
@@ -112,7 +115,7 @@ const VoiceMessage = React.memo(({ url, isMe }: { url: string; isMe?: boolean })
 // Helpers to hide raw encrypted JSON strings from UI
 const sanitizeValue = (val?: string) => isEncryptedPayload(val) ? null : val;
 
-export const MessageBubble = React.memo(({ message, isMe, onEdit, onDelete, onForward, onReply, onScrollTo, otherName, isDeleting }: MessageBubbleProps) => {
+export const MessageBubble = React.memo(({ message, isMe, onEdit, onDelete, onForward, onReply, onScrollTo, onReact, otherName, isDeleting }: MessageBubbleProps) => {
   const { user: me } = useSelector((state: RootState) => state.auth);
   const [isImageModalOpen, setIsImageModalOpen] = useState(false);
   const [decryptedUrl, setDecryptedUrl] = useState<string | null>(null);
@@ -121,6 +124,7 @@ export const MessageBubble = React.memo(({ message, isMe, onEdit, onDelete, onFo
   const [decryptedReplyText, setDecryptedReplyText] = useState<string | null>(null);
   const [decryptedMeta, setDecryptedMeta] = useState<{ fileName?: string; fileSize?: string }>({});
   const [lastBlobUrl, setLastBlobUrl] = useState<string | null>(null);
+  const [isPickerOpen, setIsPickerOpen] = useState(false);
 
   const activeUrl = decryptedUrl || sanitizeValue(message.fileUrl) || lastBlobUrl;
   const activeFileName = decryptedMeta.fileName || sanitizeValue(message.fileName);
@@ -311,9 +315,34 @@ export const MessageBubble = React.memo(({ message, isMe, onEdit, onDelete, onFo
 
   return (
     <div className={cn(
-      "flex w-full mb-2 group items-center gap-1",
+      "flex w-full mb-4 group items-start gap-1",
       isMe ? "flex-row-reverse" : "flex-row"
     )}>
+      <div className="relative">
+        {/* Reaction Picker (WhatsApp Style) */}
+        {!message.isDeleted && !isDeleting && (
+          <div className={cn(
+            "absolute bottom-full mb-1 flex items-center gap-1 p-1 bg-background/95 backdrop-blur-md border border-border/50 rounded-full shadow-xl scale-90 translate-y-2 pointer-events-none opacity-0 transition-all duration-200 z-[70]",
+            isPickerOpen && "opacity-100 scale-100 translate-y-0 pointer-events-auto",
+            isMe ? "right-0" : "left-0"
+          )}>
+            {COMMON_EMOJIS.map(emoji => (
+              <button
+                key={emoji}
+                onClick={() => {
+                  onReact?.(message.id, emoji);
+                  setIsPickerOpen(false);
+                }}
+                className={cn(
+                  "w-8 h-8 flex items-center justify-center rounded-full hover:bg-primary/10 hover:scale-125 transition-all text-lg leading-none",
+                  message.reactions?.some(r => r.emoji === emoji && String(r.userId) === String(me?.id)) && "bg-primary/10 scale-110"
+                )}
+              >
+                {emoji}
+              </button>
+            ))}
+          </div>
+        )}
       <div className={cn(
         "max-w-[85%] px-3 py-2 rounded-lg text-sm relative shadow-sm",
         isDeleting && "opacity-70 grayscale",
@@ -514,10 +543,48 @@ export const MessageBubble = React.memo(({ message, isMe, onEdit, onDelete, onFo
             </div>
           </>
         )}
+
+        {/* Reaction Summary Badge */}
+        {message.reactions && message.reactions.length > 0 && (
+          <div className={cn(
+            "absolute -bottom-3 flex items-center gap-1 bg-background/95 backdrop-blur-md border border-border/40 px-1.5 py-0.5 rounded-full shadow-sm cursor-pointer hover:bg-accent transition-colors z-[65]",
+            isMe ? "right-2" : "left-2"
+          )}>
+            <div className="flex -space-x-1 overflow-hidden">
+              {Array.from(new Set(message.reactions.map(r => r.emoji))).slice(0, 3).map(emoji => (
+                <span key={emoji} className="text-[12px] leading-none drop-shadow-sm">{emoji}</span>
+              ))}
+            </div>
+            {message.reactions.length > 1 && (
+              <span className="text-[10px] font-bold text-muted-foreground ml-0.5">
+                {message.reactions.length}
+              </span>
+            )}
+          </div>
+        )}
+      </div>
       </div>
 
       {!message.isDeleted && onEdit && (
-        <div className="flex flex-col justify-center px-1 opacity-0 group-hover:opacity-100 transition-opacity self-center">
+        <div className={cn(
+          "flex flex-col items-center justify-center gap-1 px-1 transition-all self-center",
+          isPickerOpen ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+        )}>
+          {/* Reaction Trigger Button */}
+          {!message.isDeleted && !isDeleting && (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setIsPickerOpen(!isPickerOpen)}
+              className={cn(
+                "h-8 w-8 rounded-full text-muted-foreground hover:text-primary transition-all",
+                isPickerOpen ? "text-primary bg-primary/10" : "hover:bg-primary/10"
+              )}
+            >
+              <FontAwesomeIcon icon={faFaceSmile} className="h-3.5 w-3.5" />
+            </Button>
+          )}
+
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button

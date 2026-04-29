@@ -111,7 +111,8 @@ export class ChatService {
         username: message.receiver.username,
         avatar: message.receiver.avatar,
         online: message.receiver.isOnline
-      }
+      },
+      reactions: []
     };
 
     const isBlocked = await this.prisma.block.findFirst({
@@ -238,7 +239,8 @@ export class ChatService {
         id: 'desc'
       },
       include: {
-        replyTo: true
+        replyTo: true,
+        reactions: true
       }
     });
 
@@ -274,7 +276,11 @@ export class ChatService {
             text: msg.replyTo.deletedAt ? "🚫 deleted a message" : msg.replyTo.message,
             messageType: msg.replyTo.messageType,
             isEncrypted: msg.replyTo.deletedAt ? false : msg.replyTo.isEncrypted
-          } : null
+          } : null,
+          reactions: msg.reactions.map(r => ({
+            userId: r.userId.toString(),
+            emoji: r.emoji
+          }))
         };
       }),
 
@@ -653,6 +659,62 @@ export class ChatService {
       return { success: true };
     } catch (error) {
       console.error('Error deleting message:', error.message);
+      throw error;
+    }
+  }
+
+  async addReaction(userId: number, messageId: number, emoji: string) {
+    try {
+      const message = await this.prisma.message.findUnique({
+        where: { id: messageId },
+        select: { id: true, senderId: true, receiverId: true, chatRoomId: true }
+      });
+
+      if (!message) throw new Error('Message not found');
+
+      // Find if reaction already exists
+      const existing = await this.prisma.messageReaction.findFirst({
+        where: { userId, messageId }
+      });
+
+      let result;
+      if (existing) {
+        if (existing.emoji === emoji) {
+          // Remove if same emoji clicked again
+          await this.prisma.messageReaction.delete({
+            where: { id: existing.id }
+          });
+          result = { type: 'removed', emoji };
+        } else {
+          // Update to new emoji
+          await this.prisma.messageReaction.update({
+            where: { id: existing.id },
+            data: { emoji }
+          });
+          result = { type: 'updated', emoji };
+        }
+      } else {
+        // Create new
+        await this.prisma.messageReaction.create({
+          data: { userId, messageId, emoji }
+        });
+        result = { type: 'added', emoji };
+      }
+
+      // Notify users
+      const socketPayload = {
+        messageId: messageId.toString(),
+        userId: userId.toString(),
+        emoji: result.emoji,
+        reactionType: result.type
+      };
+
+      this.chatGateway.sendMessageToUser(message.receiverId, 'messageReaction', socketPayload);
+      this.chatGateway.sendMessageToUser(message.senderId, 'messageReaction', socketPayload);
+
+      return result;
+    } catch (error) {
+      console.error('Error adding reaction:', error.message);
       throw error;
     }
   }

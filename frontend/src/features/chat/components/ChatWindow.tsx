@@ -519,6 +519,31 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
           setChatStatus('ACCEPTED');
         }
       }
+
+      if (msg.type === 'messageReaction') {
+        setLocalMessages(prev => prev.map(m => {
+          if (String(m.id).trim() === String(msg.messageId).trim()) {
+            const reactions = m.reactions || [];
+            // Use robust comparison for userId
+            const userIndex = reactions.findIndex(r => String(r.userId).trim() === String(msg.userId).trim());
+            
+            let newReactions = [...reactions];
+            if (msg.reactionType === 'removed') {
+              newReactions = newReactions.filter(r => String(r.userId).trim() !== String(msg.userId).trim());
+            } else {
+              // Both 'added' and 'updated' use the same idempotent logic
+              const reactionData = { userId: String(msg.userId).trim(), emoji: msg.emoji };
+              if (userIndex !== -1) {
+                newReactions[userIndex] = reactionData;
+              } else {
+                newReactions.push(reactionData);
+              }
+            }
+            return { ...m, reactions: newReactions };
+          }
+          return m;
+        }));
+      }
     });
   }, [chat, me?.id, dispatch]);
 
@@ -805,6 +830,41 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
     );
     setForwardSearchResults(filtered);
   }, [forwardSearchQuery, fullChatList]);
+  
+  const handleReact = (messageId: string, emoji: string) => {
+    if (!me) return;
+    const socket = getSocket();
+    if (!socket) return;
+
+    const uId = Number(me.id);
+    const mId = Number(messageId);
+    
+    // Optimistic update
+    setLocalMessages(prev => prev.map(m => {
+      if (String(m.id).trim() === String(messageId).trim()) {
+        const reactions = m.reactions || [];
+        const existingIndex = reactions.findIndex(r => String(r.userId).trim() === String(me.id).trim());
+        
+        let newReactions = [...reactions];
+        if (existingIndex !== -1) {
+          if (reactions[existingIndex].emoji === emoji) {
+            // Remove if same emoji clicked (toggle off)
+            newReactions = newReactions.filter(r => String(r.userId).trim() !== String(me.id).trim());
+          } else {
+            // Update to new emoji
+            newReactions[existingIndex] = { userId: String(me.id).trim(), emoji };
+          }
+        } else {
+          // Add new reaction
+          newReactions.push({ userId: String(me.id).trim(), emoji });
+        }
+        return { ...m, reactions: newReactions };
+      }
+      return m;
+    }));
+
+    socket.emit('react', { userId: uId, messageId: mId, emoji });
+  };
 
   const handleForward = async (targetUser: any) => {
     if (!forwardingMessage) return;
@@ -1391,6 +1451,7 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
                     }}
                     onReply={(m) => setReplyingToMessage(m)}
                     onScrollTo={scrollToMessage}
+                    onReact={handleReact}
                   />
                 </div>
               ))}
