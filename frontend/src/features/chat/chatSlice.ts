@@ -50,9 +50,10 @@ const chatSlice = createSlice({
       isEncrypted?: boolean;
       lastMessageSenderId?: string;
       lastMessageId?: string;
+      lastMessageType?: 'TEXT' | 'IMAGE' | 'VIDEO' | 'AUDIO' | 'FILE';
       isForwarded?: boolean;
     }>) => {
-      const { chatId, message, time, isMine, sender, receiver, isEncrypted, lastMessageSenderId, lastMessageId, isForwarded } = action.payload;
+      const { chatId, message, time, isMine, sender, receiver, isEncrypted, lastMessageSenderId, lastMessageId, lastMessageType, isForwarded } = action.payload;
       const chatIndex = state.chats.findIndex(c => c.id === chatId);
       
       if (chatIndex !== -1) {
@@ -64,6 +65,7 @@ const chatSlice = createSlice({
         chat.isEncrypted = isEncrypted;
         chat.lastMessageSenderId = lastMessageSenderId;
         chat.lastMessageId = lastMessageId;
+        chat.lastMessageType = lastMessageType;
         chat.isForwarded = isForwarded;
         
         if (!isMine) {
@@ -86,7 +88,8 @@ const chatSlice = createSlice({
           isEncrypted: isEncrypted,
           isForwarded: isForwarded,
           lastMessageSenderId: lastMessageSenderId,
-          lastMessageId: lastMessageId
+          lastMessageId: lastMessageId,
+          lastMessageType: lastMessageType
         };
         state.chats = [newChat, ...state.chats];
       } else if (isMine && receiver) {
@@ -103,7 +106,8 @@ const chatSlice = createSlice({
           isEncrypted: isEncrypted,
           isForwarded: isForwarded,
           lastMessageSenderId: lastMessageSenderId,
-          lastMessageId: lastMessageId
+          lastMessageId: lastMessageId,
+          lastMessageType: lastMessageType
         };
         state.chats = [newChat, ...state.chats];
       }

@@ -323,13 +323,9 @@ export class ChatService {
     if (msg.isEncrypted && msg.message) {
       try {
         const parsed = JSON.parse(msg.message);
-        if (parsed.c || parsed.text) {
-          // It's a text message, return a placeholder or letting frontend decrypt
-          return prefix + '🔒 Encrypted message';
-        } else if (parsed.m || parsed.fileMeta || (parsed.iv && (parsed.r || parsed.s))) {
-          // It's an E2EE file/attachment
-          const typeLabels: any = { 'IMAGE': '📷 Photo', 'VIDEO': '🎥 Video', 'AUDIO': '🎵 Audio', 'FILE': '📄 File' };
-          return prefix + (typeLabels[msg.messageType] || '📄 Attachment');
+        if (parsed.c || parsed.text || parsed.iv) {
+          // Return the raw encrypted string so the frontend can decrypt it
+          return msg.message;
         }
       } catch (e) {
         // Not JSON, return as is
@@ -392,7 +388,7 @@ export class ChatService {
             name: otherUser.name || otherUser.username,
             username: otherUser.username,
             avatar: otherUser.avatar,
-            lastMessage: (isMine ? "You: " : "") + displayMessage,
+            lastMessage: displayMessage,
             lastMessageId: msg.id.toString(),
             lastMessageSenderId: msg.senderId.toString(),
             lastMessageTime: this.formatTime(msg.createdAt),

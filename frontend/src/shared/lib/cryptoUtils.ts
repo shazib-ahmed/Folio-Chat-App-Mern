@@ -46,28 +46,84 @@ const getDB = (): Promise<IDBDatabase> => {
   });
 };
 
-let cachedPrivateKey: CryptoKey | null = null;
+const keyCache: { [userId: string]: { privateKey: CryptoKey; publicKey: CryptoKey } } = {};
 
-export const savePrivateKey = async (privateKey: CryptoKey): Promise<void> => {
-  cachedPrivateKey = privateKey;
+export const saveKeys = async (userId: string, keys: CryptoKeyPair): Promise<void> => {
+  keyCache[userId] = { privateKey: keys.privateKey, publicKey: keys.publicKey };
   const db = await getDB();
   const tx = db.transaction(STORE_NAME, "readwrite");
-  tx.objectStore(STORE_NAME).put(privateKey, "privateKey");
+  const store = tx.objectStore(STORE_NAME);
+  store.put(keys.privateKey, `privateKey_${userId}`);
+  store.put(keys.publicKey, `publicKey_${userId}`);
 };
 
-export const getLocalPrivateKey = async (): Promise<CryptoKey | null> => {
-  if (cachedPrivateKey) return cachedPrivateKey;
+export const getLocalKeys = async (userId: string): Promise<{ privateKey: CryptoKey; publicKey: CryptoKey } | null> => {
+  if (keyCache[userId]) return keyCache[userId];
   
   const db = await getDB();
   const tx = db.transaction(STORE_NAME, "readonly");
+  const store = tx.objectStore(STORE_NAME);
+  
+  const privReq = store.get(`privateKey_${userId}`);
+  const pubReq = store.get(`publicKey_${userId}`);
+  
   return new Promise((resolve) => {
-    const request = tx.objectStore(STORE_NAME).get("privateKey");
-    request.onsuccess = () => {
-      cachedPrivateKey = request.result || null;
-      resolve(cachedPrivateKey);
+    let priv: CryptoKey | null = null;
+    let pub: CryptoKey | null = null;
+    
+    privReq.onsuccess = () => {
+      priv = privReq.result;
+      if (priv && pub) {
+        resolve({ privateKey: priv, publicKey: pub });
+      }
     };
-    request.onerror = () => resolve(null);
+    pubReq.onsuccess = () => {
+      pub = pubReq.result;
+      if (priv && pub) {
+        resolve({ privateKey: priv, publicKey: pub });
+      }
+    };
+    
+    tx.oncomplete = async () => {
+      if (priv && pub) {
+        keyCache[userId] = { privateKey: priv, publicKey: pub };
+        resolve({ privateKey: priv, publicKey: pub });
+      } else {
+        // --- Migration Logic ---
+        // If user-specific keys aren't found, check for old generic keys
+        const mTx = db.transaction(STORE_NAME, "readwrite");
+        const mStore = mTx.objectStore(STORE_NAME);
+        
+        const legacyPrivReq = mStore.get("privateKey");
+
+        const legacyPriv: CryptoKey | null = await new Promise(r => {
+          legacyPrivReq.onsuccess = () => r(legacyPrivReq.result);
+          legacyPrivReq.onerror = () => r(null);
+        });
+
+        if (legacyPriv) {
+           // We found a legacy key! Migrate it to the current user.
+           console.log(`Migrating legacy E2EE key to user ${userId}`);
+           mStore.put(legacyPriv, `privateKey_${userId}`);
+           
+           // We might not have a legacy public key, but that's okay for decryption
+           keyCache[userId] = { privateKey: legacyPriv, publicKey: null as any }; 
+           resolve({ privateKey: legacyPriv, publicKey: null as any });
+           
+           // Clean up legacy key to prevent multiple migrations
+           mStore.delete("privateKey");
+        } else {
+           resolve(null);
+        }
+      }
+    };
+    tx.onerror = () => resolve(null);
   });
+};
+
+export const getLocalPrivateKey = async (userId: string): Promise<CryptoKey | null> => {
+  const keys = await getLocalKeys(userId);
+  return keys ? keys.privateKey : null;
 };
 
 // --- Helpers ---
@@ -189,11 +245,27 @@ export const decryptMessage = async (jsonCipher: string, privateKey: CryptoKey, 
     }
 
     // 1. Decrypt AES key with RSA
-    const decryptedAesKeyRaw = await window.crypto.subtle.decrypt(
-      { name: "RSA-OAEP" },
-      privateKey,
-      base64ToUint8Array(encryptedAesKeyB64) as any
-    );
+    let encryptedAesKeyToUse = encryptedAesKeyB64;
+    let decryptedAesKeyRaw: ArrayBuffer;
+
+    try {
+      decryptedAesKeyRaw = await window.crypto.subtle.decrypt(
+        { name: "RSA-OAEP" },
+        privateKey,
+        base64ToUint8Array(encryptedAesKeyToUse) as any
+      ) as ArrayBuffer;
+    } catch (err) {
+      // Fallback: Try the other key slot
+      console.log("DEBUG: Primary text decryption failed, trying fallback slot...");
+      encryptedAesKeyToUse = isSender ? data.r : data.s;
+      if (!encryptedAesKeyToUse) throw new Error("No fallback key slot available");
+      
+      decryptedAesKeyRaw = await window.crypto.subtle.decrypt(
+        { name: "RSA-OAEP" },
+        privateKey,
+        base64ToUint8Array(encryptedAesKeyToUse) as any
+      ) as ArrayBuffer;
+    }
 
     const aesKey = await window.crypto.subtle.importKey(
       "raw",
@@ -296,20 +368,33 @@ export const decryptFile = async (
   isSender: boolean
 ): Promise<{ decryptedBlob: Blob; fileName: string; fileSize: string }> => {
   const metadata = JSON.parse(metadataStr);
-  const encryptedAesKeyB64 = isSender ? metadata.s : metadata.r;
+  let encryptedAesKeyB64 = isSender ? metadata.s : metadata.r;
   const iv = b64Decode(metadata.iv);
+  let decryptedAesKey: ArrayBuffer;
 
-  // 1. Decrypt the AES key with RSA
-  const decryptedAesKeyRaw = await window.crypto.subtle.decrypt(
-    { name: 'RSA-OAEP' },
-    privateKey,
-    b64Decode(encryptedAesKeyB64) as any
-  ) as ArrayBuffer;
+  try {
+    decryptedAesKey = await window.crypto.subtle.decrypt(
+      { name: 'RSA-OAEP' },
+      privateKey,
+      b64Decode(encryptedAesKeyB64) as any
+    ) as ArrayBuffer;
+  } catch (err) {
+    // Fallback: Try the other key slot
+    console.log("DEBUG: Primary decryption failed, trying fallback slot...");
+    encryptedAesKeyB64 = isSender ? metadata.r : metadata.s;
+    if (!encryptedAesKeyB64) throw new Error("No fallback key slot available");
+    
+    decryptedAesKey = await window.crypto.subtle.decrypt(
+      { name: 'RSA-OAEP' },
+      privateKey,
+      b64Decode(encryptedAesKeyB64) as any
+    ) as ArrayBuffer;
+  }
 
   // 2. Import the AES key
   const aesKey = await window.crypto.subtle.importKey(
     'raw',
-    decryptedAesKeyRaw,
+    decryptedAesKey,
     { name: 'AES-GCM' },
     false,
     ['decrypt']

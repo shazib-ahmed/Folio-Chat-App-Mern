@@ -20,7 +20,7 @@ import { RootState, AppDispatch } from '@/app/store';
 import { initiateSocketConnection, disconnectSocket, subscribeToMessages, getSocket } from '@/shared/lib/socket';
 import { fetchChatList, updateChatLastMessage, setTypingStatus, setUserStatus, updateChatStatus, updateChatPreview } from '@/features/chat/chatSlice';
 import { getUserByUsernameApi, setPublicKeyApi, getPublicKeyApi } from '@/features/chat/chatService';
-import { generateE2EEKeys, savePrivateKey, exportPublicKey, getLocalPrivateKey } from '@/shared/lib/cryptoUtils';
+import { generateE2EEKeys, saveKeys, exportPublicKey, getLocalKeys } from '@/shared/lib/cryptoUtils';
 
 function ChatLayout() {
   const { chatId } = useParams<{ chatId: string }>(); // This is now a username
@@ -41,23 +41,21 @@ function ChatLayout() {
         try {
           // Check if user has a public key on the server
           const serverPubKey = await getPublicKeyApi(user.username);
-          let privateKey = await getLocalPrivateKey();
+          const localKeys = await getLocalKeys(String(user.id));
 
-          if (!privateKey) {
+          if (!localKeys) {
             console.log("Generating new E2EE keys...");
             const keys = await generateE2EEKeys();
-            await savePrivateKey(keys.privateKey);
+            await saveKeys(String(user.id), keys);
             const pubPem = await exportPublicKey(keys.publicKey);
             await setPublicKeyApi(pubPem);
             console.log("E2EE keys generated and registered.");
           } else if (!serverPubKey) {
-            console.log("Local key exists but missing on server. Re-registering...");
-            // If serverPubKey is missing, we regenerate to ensure we have a valid key pair
-            const keys = await generateE2EEKeys();
-            await savePrivateKey(keys.privateKey);
-            const pubPem = await exportPublicKey(keys.publicKey);
+            console.log("Local key exists but missing on server. Re-syncing existing key...");
+            // Re-register the existing public key
+            const pubPem = await exportPublicKey(localKeys.publicKey);
             await setPublicKeyApi(pubPem);
-            console.log("E2EE keys re-synchronized with server.");
+            console.log("E2EE public key re-registered with server.");
           }
         } catch (err) {
           console.error("Failed to initialize E2EE:", err);
@@ -122,6 +120,7 @@ function ChatLayout() {
 						isEncrypted: msg.isEncrypted,
 						lastMessageSenderId: String(msg.senderId),
 						lastMessageId: String(msg.id),
+						lastMessageType: msg.messageType,
 						isForwarded: !!msg.isForwarded
 					}));
 				}

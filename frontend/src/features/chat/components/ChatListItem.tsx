@@ -20,80 +20,70 @@ export function ChatListItem({ chat, isActive, onClick }: ChatListItemProps) {
 
   useEffect(() => {
     const handleDecryption = async () => {
-      if (chat.isEncrypted && chat.lastMessage) {
-        const privateKey = await getLocalPrivateKey();
-        if (privateKey) {
-          try {
-            let cipherText = chat.lastMessage;
-            const isSender = String(chat.lastMessageSenderId) === String(me?.id);
-            const forwardPrefix = chat.isForwarded ? '↗️ Forwarded: ' : '';
+      // 1. Basic checks
+      if (!chat.lastMessage) return;
+      
+      const isSender = String(chat.lastMessageSenderId) === String(me?.id);
+      const forwardPrefix = chat.isForwarded ? '↗️ Forwarded: ' : '';
 
-            // Check if it's already a placeholder (like "📷 Photo" or "🚫 Deleted")
-            if (cipherText.includes('📷') || cipherText.includes('🎥') || cipherText.includes('🎵') || cipherText.includes('📄') || cipherText.includes('🚫')) {
-              let final = cipherText;
-              if (chat.isForwarded && !final.includes('Forwarded')) {
-                final = '↗️ Forwarded: ' + final;
-              }
-              if (isSender && !final.startsWith('You:')) {
-                final = `You: ${final}`;
-              }
-              setDisplayText(final);
-              return;
-            }
-
-            // Check if it's JSON
-            try {
-              const parsed = JSON.parse(cipherText);
-              
-              // 1. If it has 'c' OR a top-level 'text' with 'iv', it's a standard decryptable text message
-              if (parsed.c || (parsed.text && parsed.iv)) {
-                // Do nothing here, it will fall through to decryptMessage(cipherText, ...)
-              } 
-              // 2. If it has 'm' or 'fileMeta', it's a file attachment
-              if (parsed.m || parsed.fileMeta) {
-                const typeLabels: any = { 'IMAGE': '📷 Photo', 'VIDEO': '🎥 Video', 'AUDIO': '🎵 Audio', 'FILE': '📄 File' };
-                const label = typeLabels[chat.lastMessageType || ''] || '📄 Attachment'; 
-                
-                // If it also has text, we might want to decrypt that instead of just showing the label
-                // but for sidebar, the label is usually better.
-                setDisplayText((isSender ? "You: " : "") + forwardPrefix + label);
-                return;
-              }
-              // 3. Fallback for generic encrypted JSON
-              else if (parsed.iv && (parsed.r || parsed.s)) {
-                // falls through to decryptMessage
-              }
-            } catch (e) {
-              // Not JSON
-            }
-
-            const decrypted = await decryptMessage(cipherText, privateKey, isSender);
-            setDisplayText((isSender ? "You: " : "") + forwardPrefix + decrypted);
-          } catch (err) {
-            console.error('Sidebar decryption failed:', err);
-            const isSender = String(chat.lastMessageSenderId) === String(me?.id);
-            const forwardPrefix = chat.isForwarded ? '↗️ Forwarded: ' : '';
-            setDisplayText((isSender ? "You: " : "") + forwardPrefix + chat.lastMessage);
-          }
+      // 2. If not encrypted, just format and show
+      if (!chat.isEncrypted) {
+        let msg = chat.lastMessage;
+        // Handle deleted placeholders
+        if (msg.includes('🚫') || msg.toLowerCase().includes('deleted a message')) {
+          msg = chat.isForwarded ? "Content unavailable" : (isSender ? "You deleted a message" : `${chat.name} deleted a message`);
+        } else if (chat.isForwarded && !msg.includes('Forwarded')) {
+          msg = forwardPrefix + msg;
         }
-      } else {
-        const isSender = String(chat.lastMessageSenderId) === String(me?.id);
-        const forwardPrefix = chat.isForwarded ? '↗️ Forwarded: ' : '';
-        let msg = chat.lastMessage || "";
-        
-        // Custom handling for deleted messages in sidebar
-        if (msg.includes('🚫') || msg.toLowerCase().includes('deleted a message') || msg.toLowerCase().includes('message deleted') || msg.toLowerCase().includes('content unavailable')) {
-          const text = chat.isForwarded 
-            ? "Content unavailable" 
-            : (isSender ? "You deleted a message" : `${chat.name} deleted a message`);
-          setDisplayText(text);
+        setDisplayText(isSender && !msg.startsWith('You:') ? `You: ${msg}` : msg);
+        return;
+      }
+
+      // 3. Encrypted - Need identity and keys
+      if (!me?.id) return; // Wait for session
+
+      const privateKey = await getLocalPrivateKey(String(me.id));
+      if (!privateKey) {
+        setDisplayText("🔒 Decrypting...");
+        return;
+      }
+
+      try {
+        let cipherText = chat.lastMessage;
+
+        // A. Handle non-standard placeholders already in the field
+        if (cipherText.includes('📷') || cipherText.includes('🎥') || cipherText.includes('🎵') || cipherText.includes('📄') || cipherText.includes('🚫')) {
+          let final = cipherText;
+          if (chat.isForwarded && !final.includes('Forwarded')) final = forwardPrefix + final;
+          if (isSender && !final.startsWith('You:')) final = `You: ${final}`;
+          setDisplayText(final);
           return;
         }
 
-        if (chat.isForwarded && msg && !msg.includes('Forwarded')) {
-          msg = forwardPrefix + msg;
+        // B. Handle File Wrappers (JSON but not standard E2EE payload)
+        if (cipherText.startsWith('{')) {
+          try {
+            const parsed = JSON.parse(cipherText);
+            if (parsed.m || parsed.fileMeta) {
+              const labels: any = { 'IMAGE': '📷 Photo', 'VIDEO': '🎥 Video', 'AUDIO': '🎵 Audio', 'FILE': '📄 File' };
+              const label = labels[chat.lastMessageType || ''] || '📄 Attachment';
+              setDisplayText(forwardPrefix + (isSender ? "You: " : "") + label);
+              return;
+            }
+          } catch (e) {}
         }
-        setDisplayText(isSender && msg && !msg.startsWith('You:') ? `You: ${msg}` : msg);
+
+        // C. Standard Decryption
+        const decrypted = await decryptMessage(cipherText, privateKey, isSender);
+        let final = decrypted;
+
+        if (final.startsWith('[Unable') || final.startsWith('[Decryption')) {
+          final = "🔒 Encrypted Message";
+        }
+
+        setDisplayText(forwardPrefix + (isSender && !final.startsWith('You:') ? "You: " : "") + final);
+      } catch (err) {
+        setDisplayText(forwardPrefix + (isSender ? "You: " : "") + "🔒 Encrypted Message");
       }
     };
     handleDecryption();
@@ -116,7 +106,7 @@ export function ChatListItem({ chat, isActive, onClick }: ChatListItemProps) {
           <span className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-green-500 border-2 border-background rounded-full" />
         )}
       </div>
-      
+
       <div className="flex-1 min-w-0 overflow-hidden">
         <div className="flex items-center justify-between">
           <h4 className={cn(
@@ -140,9 +130,9 @@ export function ChatListItem({ chat, isActive, onClick }: ChatListItemProps) {
               <span className="animate-pulse">typing...</span>
             ) : displayText?.startsWith('http') ? (
               <span className="flex items-center gap-1">
-                {displayText.match(/\.(jpeg|jpg|gif|png|webp)$/i) ? '📷 Photo' : 
-                 displayText.match(/\.(mp4|webm|ogg)$/i) ? '🎥 Video' : 
-                 displayText.match(/\.(mp3|wav|ogg)$/i) ? '🎵 Audio' : '📄 File'}
+                {displayText.match(/\.(jpeg|jpg|gif|png|webp)$/i) ? '📷 Photo' :
+                  displayText.match(/\.(mp4|webm|ogg)$/i) ? '🎥 Video' :
+                    displayText.match(/\.(mp3|wav|ogg)$/i) ? '🎵 Audio' : '📄 File'}
               </span>
             ) : (
               displayText

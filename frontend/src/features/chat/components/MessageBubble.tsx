@@ -74,16 +74,16 @@ const VoiceMessage = React.memo(({ url, isMe }: { url: string; isMe?: boolean })
 
   return (
     <div className="flex items-center gap-3 py-1 min-w-[220px]">
-      <audio 
-        ref={audioRef} 
-        src={url} 
+      <audio
+        ref={audioRef}
+        src={url}
         onTimeUpdate={handleTimeUpdate}
         onLoadedMetadata={handleLoadedMetadata}
         onEnded={() => setIsPlaying(false)}
       />
-      <Button 
-        variant="ghost" 
-        size="icon" 
+      <Button
+        variant="ghost"
+        size="icon"
         onClick={togglePlay}
         className={cn(
           "h-10 w-10 rounded-full shrink-0",
@@ -92,11 +92,11 @@ const VoiceMessage = React.memo(({ url, isMe }: { url: string; isMe?: boolean })
       >
         <FontAwesomeIcon icon={isPlaying ? faPause : faPlay} className="h-5 w-5" />
       </Button>
-      
+
       <div className="flex-1 space-y-1.5">
         <div className="relative h-1.5 bg-black/10 dark:bg-white/10 rounded-full overflow-hidden">
-          <div 
-            className={cn("absolute inset-0 rounded-full", isMe ? "bg-white" : "bg-primary")} 
+          <div
+            className={cn("absolute inset-0 rounded-full", isMe ? "bg-white" : "bg-primary")}
             style={{ width: `${progress}%` }}
           />
         </div>
@@ -121,7 +121,7 @@ export const MessageBubble = React.memo(({ message, isMe, onEdit, onDelete, onFo
   const [decryptedReplyText, setDecryptedReplyText] = useState<string | null>(null);
   const [decryptedMeta, setDecryptedMeta] = useState<{ fileName?: string; fileSize?: string }>({});
   const [lastBlobUrl, setLastBlobUrl] = useState<string | null>(null);
-  
+
   const activeUrl = decryptedUrl || sanitizeValue(message.fileUrl) || lastBlobUrl;
   const activeFileName = decryptedMeta.fileName || sanitizeValue(message.fileName);
   const activeFileSize = decryptedMeta.fileSize || sanitizeValue(message.fileSize);
@@ -137,18 +137,20 @@ export const MessageBubble = React.memo(({ message, isMe, onEdit, onDelete, onFo
     let currentBlobUrl: string | null = null;
 
     const handleDecrypt = async () => {
+      let privateKey: CryptoKey | null = null;
+
+      // 1. Decrypt parent message if encrypted
       if (message.isEncrypted) {
         setIsDecrypting(true);
-        console.log(`DEBUG: Decrypting message ${message.id}, type=${message.messageType}, isMe=${isMe}, hasFileMeta=${!!message.fileMeta}`);
         try {
-          const privateKey = await getLocalPrivateKey();
+          privateKey = me?.id ? await getLocalPrivateKey(String(me.id)) : null;
           if (!privateKey || !isMounted) return;
 
           const isSender = isMe || false;
           let cipherText = message.text || "";
           let fileMeta = message.fileMeta;
 
-          // 0. Handle wrapped JSON (often for files with captions or re-wrapped forwarded files)
+          // Handle wrapped JSON
           if (cipherText.startsWith('{')) {
             try {
               const parsed = JSON.parse(cipherText);
@@ -156,81 +158,47 @@ export const MessageBubble = React.memo(({ message, isMe, onEdit, onDelete, onFo
                 fileMeta = parsed.fileMeta;
                 cipherText = parsed.text || "";
               }
-            } catch (e) {
-              // Not wrapped JSON
-            }
+            } catch (e) { }
           }
 
-          // 1. Decrypt text if it's an encrypted payload
+          // Decrypt text
           if (cipherText && isEncryptedPayload(cipherText)) {
-            console.log("DEBUG: Decrypting text...");
             const decrypted = await decryptMessage(cipherText, privateKey, isSender);
-            console.log("DEBUG: Decrypted text:", decrypted);
             if (isMounted) setDecryptedText(decrypted);
           } else if (cipherText && isMounted) {
             setDecryptedText(cipherText);
           }
 
-          // 2. Decrypt file if exists
+          // Decrypt file
           if ((message.fileUrl || fileMeta) && !message.fileUrl?.startsWith('blob:')) {
             let realFileUrl = message.fileUrl;
             let realFileName = message.fileName || "";
+            let realFileSize = message.fileSize || "";
 
-            console.log("DEBUG: File found, url encrypted?", isEncryptedPayload(message.fileUrl));
-
-            // Decrypt fileUrl if it's an encrypted payload
             if (isEncryptedPayload(message.fileUrl)) {
               realFileUrl = await decryptMessage(message.fileUrl || "", privateKey, isSender);
-              console.log("DEBUG: Decrypted fileUrl:", realFileUrl);
             }
-
-            // Decrypt fileName if it's an encrypted payload
             if (message.fileName && isEncryptedPayload(message.fileName)) {
               realFileName = await decryptMessage(message.fileName, privateKey, isSender);
             }
-
-            // Decrypt fileSize if it's an encrypted payload
-            let realFileSize = message.fileSize || "";
             if (message.fileSize && isEncryptedPayload(message.fileSize)) {
               realFileSize = await decryptMessage(message.fileSize, privateKey, isSender);
             }
 
             if (realFileUrl && !realFileUrl.startsWith('[Unable') && fileMeta && isMounted) {
-              console.log("DEBUG: Fetching blob from", realFileUrl);
               const response = await fetch(realFileUrl);
               const encryptedBlob = await response.blob();
-              console.log("DEBUG: Blob fetched, size:", encryptedBlob.size);
               const decrypted = await decryptFile(encryptedBlob, fileMeta, privateKey, isSender);
-              console.log("DEBUG: Blob decrypted, filename:", decrypted.fileName);
-              
+
               if (isMounted) {
                 const url = window.URL.createObjectURL(decrypted.decryptedBlob);
                 currentBlobUrl = url;
                 setDecryptedUrl(url);
-                setDecryptedMeta({ 
-                  fileName: decrypted.fileName || realFileName, 
-                  fileSize: decrypted.fileSize || realFileSize 
+                setDecryptedMeta({
+                  fileName: decrypted.fileName || realFileName,
+                  fileSize: decrypted.fileSize || realFileSize
                 });
               }
-            }
-          }
-
-          // 3. Decrypt replyTo text if exists
-          if (message.replyTo?.text) {
-            let replyCipherText = message.replyTo.text;
-            if (replyCipherText.startsWith('{')) {
-              try {
-                const parsed = JSON.parse(replyCipherText);
-                if (parsed.text) replyCipherText = parsed.text;
-              } catch (e) {}
-            }
-
-            if (isEncryptedPayload(replyCipherText)) {
-              const isOriginalReplySender = String(message.replyTo.senderId) === String(me?.id);
-              const decryptedReply = await decryptMessage(replyCipherText, privateKey, isOriginalReplySender);
-              if (isMounted) setDecryptedReplyText(decryptedReply);
-            } else if (isMounted) {
-              setDecryptedReplyText(replyCipherText);
             }
           }
         } catch (err) {
@@ -239,22 +207,79 @@ export const MessageBubble = React.memo(({ message, isMe, onEdit, onDelete, onFo
           if (isMounted) setIsDecrypting(false);
         }
       }
+
+      // 2. Decrypt replyTo text independently
+      if (message.replyTo?.text) {
+        try {
+          let replyCipherText = message.replyTo.text;
+
+          // Handle wrapped JSON for replies
+          if (replyCipherText.startsWith('{')) {
+            try {
+              const parsed = JSON.parse(replyCipherText);
+              if (parsed.text) replyCipherText = parsed.text;
+            } catch (e) { }
+          }
+
+          if (isEncryptedPayload(replyCipherText)) {
+            // Need private key
+            if (!privateKey) privateKey = me?.id ? await getLocalPrivateKey(String(me.id)) : null;
+
+            if (privateKey) {
+              // Ensure we compare IDs as strings to avoid type mismatches
+              const myId = String(me?.id || "");
+              const originalSenderId = String(message.replyTo.senderId || "");
+              const isOriginalReplySender = originalSenderId === myId;
+
+              const decryptedReply = await decryptMessage(replyCipherText, privateKey, isOriginalReplySender);
+
+              if (isMounted) {
+                // If it's a valid string (including empty string), we set it.
+                // We only fall back to lock if it's explicitly a failure message.
+                if (decryptedReply !== null && !decryptedReply.startsWith('[Unable') && !decryptedReply.startsWith('[Decryption')) {
+                  let finalReplyText = decryptedReply;
+                  if (!finalReplyText && message.replyTo.messageType !== 'TEXT') {
+                    const labels: any = { 'IMAGE': '📷 Photo', 'VIDEO': '🎥 Video', 'AUDIO': '🎵 Audio', 'FILE': '📄 File' };
+                    const mType = message.replyTo.messageType as any;
+                    finalReplyText = labels[mType] || '📄 Attachment';
+                  }
+                  setDecryptedReplyText(finalReplyText);
+                } else {
+                  setDecryptedReplyText(null); // Fallback to lock icon
+                }
+              }
+            }
+          } else if (isMounted) {
+            // If it's already plain text (e.g. from optimistic update or already decrypted in state)
+            let finalReplyText = replyCipherText;
+            if (!finalReplyText && message.replyTo.messageType !== 'TEXT') {
+              const labels: any = { 'IMAGE': '📷 Photo', 'VIDEO': '🎥 Video', 'AUDIO': '🎵 Audio', 'FILE': '📄 File' };
+              const mType = message.replyTo.messageType as any;
+              finalReplyText = labels[mType] || '📄 Attachment';
+            }
+            setDecryptedReplyText(finalReplyText);
+          }
+        } catch (e) {
+          console.error("Reply decryption error:", e);
+        }
+      }
     };
 
     handleDecrypt();
+
     return () => {
       isMounted = false;
       if (currentBlobUrl) {
         window.URL.revokeObjectURL(currentBlobUrl);
       }
     };
-  }, [message.id, message.fileUrl, message.fileMeta, message.text, message.fileName, message.fileSize, message.isEncrypted, message.messageType, message.replyTo?.text, message.replyTo?.senderId, isMe, me?.id]);
+  }, [message.id, message.fileUrl, message.fileMeta, message.text, message.fileName, message.fileSize, message.isEncrypted, message.messageType, message.replyTo, message.replyTo?.text, message.replyTo?.senderId, message.replyTo?.messageType, isMe, me?.id]);
 
 
   const handleDownload = async (e: React.MouseEvent, url: string, fileName: string) => {
     e.preventDefault();
     e.stopPropagation();
-    
+
     // Cloudinary force download trick: insert 'fl_attachment' after 'upload/'
     let downloadUrl = url;
     if (url.includes('cloudinary.com') && url.includes('/upload/')) {
@@ -264,7 +289,7 @@ export const MessageBubble = React.memo(({ message, isMe, onEdit, onDelete, onFo
     try {
       const response = await fetch(url);
       if (!response.ok) throw new Error('Download failed');
-      
+
       const blob = await response.blob();
       const blobUrl = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
@@ -292,19 +317,19 @@ export const MessageBubble = React.memo(({ message, isMe, onEdit, onDelete, onFo
       <div className={cn(
         "max-w-[85%] px-3 py-2 rounded-lg text-sm relative shadow-sm",
         isDeleting && "opacity-70 grayscale",
-        message.isDeleted 
+        message.isDeleted
           ? (isMe ? "bg-muted/30 text-muted-foreground italic border border-muted" : "bg-muted/30 text-muted-foreground italic border border-muted")
-          : (isMe 
-              ? "bg-[hsl(var(--bubble-me))] text-primary-foreground rounded-tr-none" 
-              : "bg-[hsl(var(--bubble-other))] text-foreground rounded-tl-none border border-border/40")
+          : (isMe
+            ? "bg-[hsl(var(--bubble-me))] text-primary-foreground rounded-tr-none"
+            : "bg-[hsl(var(--bubble-other))] text-foreground rounded-tl-none border border-border/40")
       )}>
         {/* Deleted Message Placeholder */}
         {message.isDeleted ? (
           <div className="flex items-center gap-2 py-1 min-w-[200px]">
             <FontAwesomeIcon icon={faTrash} className="h-3 w-3 opacity-40" />
             <span className="text-[11px]">
-              {message.isForwarded 
-                ? "Content unavailable" 
+              {message.isForwarded
+                ? "Content unavailable"
                 : (isMe ? "You deleted a message" : `${otherName || 'User'} deleted a message`)}
             </span>
             {isDeleting && (
@@ -315,7 +340,7 @@ export const MessageBubble = React.memo(({ message, isMe, onEdit, onDelete, onFo
           <>
             {/* Reply Quote */}
             {message.replyTo && (
-              <div 
+              <div
                 onClick={(e) => {
                   e.stopPropagation();
                   onScrollTo?.(message.replyTo!.id);
@@ -342,162 +367,162 @@ export const MessageBubble = React.memo(({ message, isMe, onEdit, onDelete, onFo
               </div>
             )}
             {/* Triangle Tail */}
-        <div className={cn(
-          "absolute top-0 w-3 h-3",
-          isMe 
-            ? "right-[-8px] text-[hsl(var(--bubble-me))]" 
-            : "left-[-8px] text-[hsl(var(--bubble-other))]"
-        )}>
-           <svg viewBox="0 0 8 13" preserveAspectRatio="none" className="w-full h-full fill-current">
-              <path d={isMe ? "M0 0 L8 0 L0 13 Z" : "M8 0 L0 0 L8 13 Z"} />
-           </svg>
-        </div>
+            <div className={cn(
+              "absolute top-0 w-3 h-3",
+              isMe
+                ? "right-[-8px] text-[hsl(var(--bubble-me))]"
+                : "left-[-8px] text-[hsl(var(--bubble-other))]"
+            )}>
+              <svg viewBox="0 0 8 13" preserveAspectRatio="none" className="w-full h-full fill-current">
+                <path d={isMe ? "M0 0 L8 0 L0 13 Z" : "M8 0 L0 0 L8 13 Z"} />
+              </svg>
+            </div>
 
-        {/* Forwarded Label */}
-        {message.isForwarded && (
-          <div className="flex items-center gap-1.5 mb-1.5 opacity-60">
-            <FontAwesomeIcon icon={faShare} className="text-[10px]" />
-            <span className="text-[10px] italic font-medium">Forwarded</span>
-          </div>
-        )}
-
-        {/* Media Attachments */}
-        {message.messageType === 'IMAGE' && (
-          <div className="mb-2 rounded overflow-hidden max-w-[320px] relative min-h-[100px] w-full">
-            {activeUrl ? (
-              <img 
-                src={activeUrl} 
-                alt="Sent" 
-                className="w-full h-auto max-h-[400px] object-cover cursor-pointer hover:opacity-95 transition-opacity min-w-[200px]"
-                onClick={() => setIsImageModalOpen(true)}
-              />
-            ) : showLoading ? (
-              <div className="w-[240px] h-[200px] bg-black/5 dark:bg-white/5 flex flex-col items-center justify-center gap-2 relative">
-                <Skeleton className="w-full h-full absolute inset-0" />
-                <div className="relative z-10">
-                  <div className="w-5 h-5 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
-                </div>
+            {/* Forwarded Label */}
+            {message.isForwarded && (
+              <div className="flex items-center gap-1.5 mb-1.5 opacity-60">
+                <FontAwesomeIcon icon={faShare} className="text-[10px]" />
+                <span className="text-[10px] italic font-medium">Forwarded</span>
               </div>
-            ) : null}
-          </div>
-        )}
+            )}
 
-        {isImageModalOpen && (
-          <div 
-            className="fixed inset-0 z-[9999] bg-black/90 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-300"
-            onClick={(e) => {
-              e.stopPropagation();
-              setIsImageModalOpen(false);
-            }}
-          >
-            <div className="relative max-w-[90vw] max-h-[90vh] flex items-center justify-center">
-              <img 
-                src={activeUrl || undefined} 
-                alt="Full view" 
-                className="max-w-full max-h-[90vh] object-contain rounded-lg shadow-2xl animate-in zoom-in duration-300"
-                onClick={(e) => e.stopPropagation()}
-              />
-              <button 
-                className="absolute top-[-50px] right-0 md:right-[-50px] md:top-0 text-white hover:text-primary transition-colors text-2xl p-2 h-12 w-12 flex items-center justify-center bg-white/10 hover:bg-white/20 rounded-full"
-                onClick={() => setIsImageModalOpen(false)}
+            {/* Media Attachments */}
+            {message.messageType === 'IMAGE' && (
+              <div className="mb-2 rounded overflow-hidden max-w-[320px] relative min-h-[100px] w-full">
+                {activeUrl ? (
+                  <img
+                    src={activeUrl}
+                    alt="Sent"
+                    className="w-full h-auto max-h-[400px] object-cover cursor-pointer hover:opacity-95 transition-opacity min-w-[200px]"
+                    onClick={() => setIsImageModalOpen(true)}
+                  />
+                ) : showLoading ? (
+                  <div className="w-[240px] h-[200px] bg-black/5 dark:bg-white/5 flex flex-col items-center justify-center gap-2 relative">
+                    <Skeleton className="w-full h-full absolute inset-0" />
+                    <div className="relative z-10">
+                      <div className="w-5 h-5 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            )}
+
+            {isImageModalOpen && (
+              <div
+                className="fixed inset-0 z-[9999] bg-black/90 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-300"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setIsImageModalOpen(false);
+                }}
               >
-                <FontAwesomeIcon icon={faXmark} />
-              </button>
-            </div>
-          </div>
-        )}
-
-        {message.messageType === 'VIDEO' && (
-          <div className="mb-2 rounded overflow-hidden max-w-[320px] relative">
-            {activeUrl ? (
-              <video 
-                src={activeUrl} 
-                controls 
-                className="w-full aspect-video rounded"
-              />
-            ) : showLoading ? (
-              <Skeleton className="w-full aspect-video" />
-            ) : null}
-          </div>
-        )}
-
-        {message.messageType === 'AUDIO' && (
-          <div className="relative">
-            {activeUrl ? (
-              <VoiceMessage url={activeUrl} isMe={isMe} />
-            ) : showLoading ? (
-              <div className="flex items-center gap-3 py-1 min-w-[220px]">
-                <Skeleton className="h-10 w-10 rounded-full" />
-                <div className="flex-1 space-y-2">
-                  <Skeleton className="h-1.5 w-full rounded-full" />
-                  <Skeleton className="h-2 w-20 rounded-full" />
+                <div className="relative max-w-[90vw] max-h-[90vh] flex items-center justify-center">
+                  <img
+                    src={activeUrl || undefined}
+                    alt="Full view"
+                    className="max-w-full max-h-[90vh] object-contain rounded-lg shadow-2xl animate-in zoom-in duration-300"
+                    onClick={(e) => e.stopPropagation()}
+                  />
+                  <button
+                    className="absolute top-[-50px] right-0 md:right-[-50px] md:top-0 text-white hover:text-primary transition-colors text-2xl p-2 h-12 w-12 flex items-center justify-center bg-white/10 hover:bg-white/20 rounded-full"
+                    onClick={() => setIsImageModalOpen(false)}
+                  >
+                    <FontAwesomeIcon icon={faXmark} />
+                  </button>
                 </div>
               </div>
-            ) : null}
-          </div>
-        )}
+            )}
 
-        {message.messageType === 'FILE' && (
-          <div className="mb-2 min-w-[240px]">
-            <div 
-              onClick={(e) => !showLoading && activeUrl && handleDownload(e, activeUrl, activeFileName || 'file')}
-              className={cn(
-                "flex items-center gap-3 p-2 bg-black/5 dark:bg-white/5 rounded border border-black/10 dark:border-white/10 group transition-colors cursor-pointer",
-                (!showLoading && activeUrl) && "hover:bg-black/10 dark:hover:bg-white/10"
-              )}
-            >
-              <div className="w-9 h-9 bg-primary/20 rounded flex items-center justify-center shrink-0">
-                {showLoading && !activeUrl ? (
-                  <div className="w-4 h-4 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
-                ) : (
-                  <FontAwesomeIcon icon={faFileLines} className="text-primary text-lg" />
-                )}
+            {message.messageType === 'VIDEO' && (
+              <div className="mb-2 rounded overflow-hidden max-w-[320px] relative">
+                {activeUrl ? (
+                  <video
+                    src={activeUrl}
+                    controls
+                    className="w-full aspect-video rounded"
+                  />
+                ) : showLoading ? (
+                  <Skeleton className="w-full aspect-video" />
+                ) : null}
               </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-[11px] font-semibold truncate">{activeFileName || 'Attachment'}</p>
-                <p className="text-[9px] opacity-60">
-                  {activeFileSize || 'Click to view/download'}
-                </p>
+            )}
+
+            {message.messageType === 'AUDIO' && (
+              <div className="relative">
+                {activeUrl ? (
+                  <VoiceMessage url={activeUrl} isMe={isMe} />
+                ) : showLoading ? (
+                  <div className="flex items-center gap-3 py-1 min-w-[220px]">
+                    <Skeleton className="h-10 w-10 rounded-full" />
+                    <div className="flex-1 space-y-2">
+                      <Skeleton className="h-1.5 w-full rounded-full" />
+                      <Skeleton className="h-2 w-20 rounded-full" />
+                    </div>
+                  </div>
+                ) : null}
               </div>
-              {!showLoading && activeUrl && (
-                <FontAwesomeIcon icon={faDownload} className="text-[10px] opacity-40 group-hover:opacity-100 transition-opacity" />
+            )}
+
+            {message.messageType === 'FILE' && (
+              <div className="mb-2 min-w-[240px]">
+                <div
+                  onClick={(e) => !showLoading && activeUrl && handleDownload(e, activeUrl, activeFileName || 'file')}
+                  className={cn(
+                    "flex items-center gap-3 p-2 bg-black/5 dark:bg-white/5 rounded border border-black/10 dark:border-white/10 group transition-colors cursor-pointer",
+                    (!showLoading && activeUrl) && "hover:bg-black/10 dark:hover:bg-white/10"
+                  )}
+                >
+                  <div className="w-9 h-9 bg-primary/20 rounded flex items-center justify-center shrink-0">
+                    {showLoading && !activeUrl ? (
+                      <div className="w-4 h-4 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
+                    ) : (
+                      <FontAwesomeIcon icon={faFileLines} className="text-primary text-lg" />
+                    )}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[11px] font-semibold truncate">{activeFileName || 'Attachment'}</p>
+                    <p className="text-[9px] opacity-60">
+                      {activeFileSize || 'Click to view/download'}
+                    </p>
+                  </div>
+                  {!showLoading && activeUrl && (
+                    <FontAwesomeIcon icon={faDownload} className="text-[10px] opacity-40 group-hover:opacity-100 transition-opacity" />
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Message Text / Caption */}
+            {((message.messageType === 'TEXT') || (message.fileUrl && activeText)) && (
+              <p className="leading-relaxed break-words whitespace-pre-wrap">{activeText}</p>
+            )}
+            <div className="flex items-center justify-end gap-1.5 mt-1 select-none">
+              {message.isEdited && <span className="text-[9px] opacity-40 font-medium italic">Edited</span>}
+              <span className="text-[10px] opacity-60 font-medium">
+                {message.timestamp}
+              </span>
+              {isMe && (
+                <div className="flex items-center">
+                  {message.status === 'pending' ? (
+                    <FontAwesomeIcon icon={faClock} className="h-2.5 w-2.5 opacity-40" />
+                  ) : message.status === 'SEEN' ? (
+                    <FontAwesomeIcon icon={faCheckDouble} className="h-3 w-3 text-[#10ff00] dark:text-[#152a34]" />
+                  ) : (
+                    <FontAwesomeIcon icon={faCheckDouble} className="h-3 w-3 opacity-40" />
+                  )}
+                </div>
               )}
             </div>
-          </div>
+          </>
         )}
-
-        {/* Message Text / Caption */}
-        {((message.messageType === 'TEXT') || (message.fileUrl && activeText)) && (
-          <p className="leading-relaxed break-words whitespace-pre-wrap">{activeText}</p>
-        )}
-        <div className="flex items-center justify-end gap-1.5 mt-1 select-none">
-          {message.isEdited && <span className="text-[9px] opacity-40 font-medium italic">Edited</span>}
-          <span className="text-[10px] opacity-60 font-medium">
-            {message.timestamp}
-          </span>
-          {isMe && (
-            <div className="flex items-center">
-              {message.status === 'pending' ? (
-                <FontAwesomeIcon icon={faClock} className="h-2.5 w-2.5 opacity-40" />
-              ) : message.status === 'SEEN' ? (
-                <FontAwesomeIcon icon={faCheckDouble} className="h-3 w-3 text-sky-400" />
-              ) : (
-                <FontAwesomeIcon icon={faCheckDouble} className="h-3 w-3 opacity-40" />
-              )}
-            </div>
-          )}
-        </div>
-      </>
-    )}
       </div>
 
       {!message.isDeleted && onEdit && (
         <div className="flex flex-col justify-center px-1 opacity-0 group-hover:opacity-100 transition-opacity self-center">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button 
-                variant="ghost" 
-                size="icon" 
+              <Button
+                variant="ghost"
+                size="icon"
                 className="h-8 w-8 rounded-full text-muted-foreground hover:text-primary hover:bg-primary/10"
               >
                 <FontAwesomeIcon icon={faEllipsisVertical} className="h-3.5 w-3.5" />
@@ -511,8 +536,8 @@ export const MessageBubble = React.memo(({ message, isMe, onEdit, onDelete, onFo
                 </DropdownMenuItem>
               )}
               {isMe && (
-                <DropdownMenuItem 
-                  onClick={() => onDelete?.(message.id)} 
+                <DropdownMenuItem
+                  onClick={() => onDelete?.(message.id)}
                   className="gap-2 cursor-pointer text-destructive focus:text-destructive"
                 >
                   <FontAwesomeIcon icon={faTrash} className="h-3 w-3" />

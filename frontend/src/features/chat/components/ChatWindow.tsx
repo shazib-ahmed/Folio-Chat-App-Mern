@@ -65,7 +65,7 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
   const [searchMatchIndex, setSearchMatchIndex] = useState(-1);
   const [recipientPublicKey, setRecipientPublicKey] = useState<string | null>(null);
   const [myPublicKey, setMyPublicKey] = useState<string | null>(null);
-  
+
   const dispatch = useDispatch<AppDispatch>();
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -89,6 +89,12 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
+  useEffect(() => {
+    if (localMessages.length > 0 && !isLoadingMessages && !isFetchingMore) {
+      scrollToBottom('auto');
+    }
+  }, [localMessages.length, isLoadingMessages, isFetchingMore]);
+
   // Update ref when chat changes
   useEffect(() => {
     currentChatRef.current = chat;
@@ -110,7 +116,7 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
       }
 
       (getMessagesApi(chat.username) as Promise<any>).then(async data => {
-        const privateKey = await getLocalPrivateKey();
+        const privateKey = me?.id ? await getLocalPrivateKey(String(me.id)) : null;
         const decryptedMessages = await Promise.all((data.messages || []).map(async (msg: any) => {
           if (!msg.isEncrypted || !privateKey) return msg;
 
@@ -159,14 +165,34 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
             decryptedFileSize = await decryptMessage(msg.fileSize, privateKey, isSender);
           }
 
-          return { 
-            ...msg, 
-            text: decryptedText, 
-            fileUrl: decryptedFileUrl, 
-            fileName: decryptedFileName, 
+          let decryptedReply = msg.replyTo;
+          if (msg.replyTo && privateKey) {
+            try {
+              const isReplySender = String(msg.replyTo.senderId) === String(me?.id);
+              let text = msg.replyTo.text;
+              
+              if (msg.replyTo.text && isEncryptedPayload(msg.replyTo.text)) {
+                text = await decryptMessage(msg.replyTo.text, privateKey, isReplySender);
+              }
+
+              // If it's a file without caption, use a friendly label
+              if (!text && msg.replyTo.messageType !== 'TEXT') {
+                const labels: any = { 'IMAGE': '📷 Photo', 'VIDEO': '🎥 Video', 'AUDIO': '🎵 Audio', 'FILE': '📄 File' };
+                text = labels[msg.replyTo.messageType] || '📄 Attachment';
+              }
+
+              decryptedReply = { ...msg.replyTo, text };
+            } catch (e) {}
+          }
+
+          return {
+            ...msg,
+            text: decryptedText,
+            fileUrl: decryptedFileUrl,
+            fileName: decryptedFileName,
             fileSize: decryptedFileSize,
             fileMeta,
-            replyTo: msg.replyTo // Explicitly preserve replyTo
+            replyTo: decryptedReply
           };
 
         }));
@@ -178,13 +204,13 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
         setChatStatus(data.chatStatus || 'ACCEPTED');
         setRequesterId(data.requesterId ? String(data.requesterId) : null);
         setHasMore(data.hasMore);
-        
+
         // Mark as seen when opening the chat
         markSeenApi(chat.id).then(() => {
           dispatch(clearUnreadCount(chat.id));
         }).catch(err => console.error('Failed to mark as seen:', err));
       }).catch(err => console.error('Failed to fetch messages:', err))
-      .finally(() => setIsLoadingMessages(false));
+        .finally(() => setIsLoadingMessages(false));
     } else {
       setLocalMessages([]);
     }
@@ -194,7 +220,7 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
   useEffect(() => {
     if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
     const controller = new AbortController();
-    
+
     if (searchQuery.trim().length >= 2 && chat?.username) {
       searchTimeoutRef.current = setTimeout(async () => {
         try {
@@ -202,7 +228,7 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
           const resultIds = results.map((r: any) => r.id);
           setSearchResults(resultIds);
           setSearchMatchIndex(resultIds.length > 0 ? 0 : -1);
-          
+
           if (resultIds.length > 0) {
             const firstId = resultIds[0];
             if (localMessages.some(m => m.id === firstId)) {
@@ -236,17 +262,17 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
 
   const navigateSearch = (direction: 'next' | 'prev') => {
     if (searchResults.length === 0) return;
-    
+
     let newIndex = searchMatchIndex;
     if (direction === 'next') {
       newIndex = (searchMatchIndex + 1) % searchResults.length;
     } else {
       newIndex = (searchMatchIndex - 1 + searchResults.length) % searchResults.length;
     }
-    
+
     setSearchMatchIndex(newIndex);
     const targetId = searchResults[newIndex];
-    
+
     if (localMessages.some(m => m.id === targetId)) {
       scrollToMessage(targetId);
     } else {
@@ -270,21 +296,21 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
       }
 
       if (msg.type === 'messageUpdated') {
-        const privateKey = await getLocalPrivateKey();
+        const privateKey = me?.id ? await getLocalPrivateKey(String(me.id)) : null;
         let decryptedText = msg.text;
-        
+
         if (msg.isEncrypted && privateKey) {
           const isSender = String(msg.senderId) === String(me?.id);
           try {
-             decryptedText = await decryptMessage(msg.text, privateKey, isSender);
+            decryptedText = await decryptMessage(msg.text, privateKey, isSender);
           } catch (e) {
             console.error("Socket: Failed to decrypt updated message:", e);
           }
         }
 
-        setLocalMessages(prev => prev.map(m => 
-          String(m.id) === String(msg.id) 
-            ? { ...m, text: decryptedText, isEdited: true } 
+        setLocalMessages(prev => prev.map(m =>
+          String(m.id) === String(msg.id)
+            ? { ...m, text: decryptedText, isEdited: true }
             : m
         ));
 
@@ -299,9 +325,9 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
       }
 
       if (msg.type === 'messageDeleted') {
-        setLocalMessages(prev => prev.map(m => 
-          String(m.id) === String(msg.id) 
-            ? { ...m, isDeleted: true, text: "", fileUrl: "", fileName: "", fileSize: "", messageType: 'TEXT' } 
+        setLocalMessages(prev => prev.map(m =>
+          String(m.id) === String(msg.id)
+            ? { ...m, isDeleted: true, text: "", fileUrl: "", fileName: "", fileSize: "", messageType: 'TEXT' }
             : m
         ));
         dispatch(updateChatPreview({
@@ -352,13 +378,14 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
         (String(msg.senderId) === String(chat.id) && String(msg.receiverId) === String(me?.id)) ||
         (String(msg.senderId) === String(me?.id) && String(msg.receiverId) === String(chat.id))
       )) {
-        
-        const privateKey = await getLocalPrivateKey();
+
+        const privateKey = me?.id ? await getLocalPrivateKey(String(me.id)) : null;
         let decryptedText = msg.text;
         let decryptedFileUrl = msg.fileUrl;
         let decryptedFileName = msg.fileName;
         let decryptedFileSize = msg.fileSize;
         let fileMeta = "";
+        let decryptedReply = msg.replyTo;
 
         if (msg.isEncrypted && privateKey) {
           const isSender = String(msg.senderId) === String(me?.id);
@@ -398,27 +425,46 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
           if (msg.fileSize && isEncryptedPayload(msg.fileSize)) {
             decryptedFileSize = await decryptMessage(msg.fileSize, privateKey, isSender);
           }
+          
+          // 5. Decrypt replyTo if exists
+          if (msg.replyTo) {
+            try {
+              const isReplySender = String(msg.replyTo.senderId) === String(me?.id);
+              let text = msg.replyTo.text;
+
+              if (msg.replyTo.text && isEncryptedPayload(msg.replyTo.text)) {
+                text = await decryptMessage(msg.replyTo.text, privateKey, isReplySender);
+              }
+
+              if (!text && msg.replyTo.messageType !== 'TEXT') {
+                const labels: any = { 'IMAGE': '📷 Photo', 'VIDEO': '🎥 Video', 'AUDIO': '🎵 Audio', 'FILE': '📄 File' };
+                text = labels[msg.replyTo.messageType] || '📄 Attachment';
+              }
+
+              decryptedReply = { ...msg.replyTo, text };
+            } catch (e) {}
+          }
         }
 
-        const decryptedMsg = { 
+        const decryptedMsg = {
           ...msg,
           text: decryptedText,
           fileUrl: decryptedFileUrl,
           fileName: decryptedFileName,
           fileSize: decryptedFileSize,
           fileMeta,
-          replyTo: msg.replyTo // Explicitly preserve replyTo from socket payload
+          replyTo: decryptedReply
         };
 
 
 
         setLocalMessages(prev => {
           const isMine = String(msg.senderId) === String(me?.id);
-          
+
           if (isMine && msg.clientMsgId) {
             // Find the specific temp message using clientMsgId
             const tempIndex = prev.findIndex(m => m.id === msg.clientMsgId);
-            
+
             if (tempIndex !== -1) {
               const newMsgs = [...prev];
               // Ensure we don't overwrite with empty text if decryption failed
@@ -427,7 +473,8 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
                 text: decryptedMsg.text || prev[tempIndex].text,
                 fileUrl: prev[tempIndex].fileUrl && prev[tempIndex].fileUrl.startsWith('blob:') ? prev[tempIndex].fileUrl : decryptedMsg.fileUrl,
                 fileName: prev[tempIndex].fileName && !isEncryptedPayload(prev[tempIndex].fileName) ? prev[tempIndex].fileName : decryptedMsg.fileName,
-                fileSize: prev[tempIndex].fileSize && !isEncryptedPayload(prev[tempIndex].fileSize) ? prev[tempIndex].fileSize : decryptedMsg.fileSize
+                fileSize: prev[tempIndex].fileSize && !isEncryptedPayload(prev[tempIndex].fileSize) ? prev[tempIndex].fileSize : decryptedMsg.fileSize,
+                replyTo: decryptedMsg.replyTo
               };
 
               newMsgs[tempIndex] = finalMsg;
@@ -437,14 +484,14 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
 
           // Fallback to old matching logic if clientMsgId is missing
           if (isMine) {
-            const tempIndex = [...prev].reverse().findIndex(m => 
+            const tempIndex = [...prev].reverse().findIndex(m =>
               String(m.id).startsWith('temp-') || String(m.id).startsWith('cmsg-')
             );
             if (tempIndex !== -1) {
               const actualIndex = prev.length - 1 - tempIndex;
               const newMsgs = [...prev];
-              newMsgs[actualIndex] = { 
-                ...decryptedMsg, 
+              newMsgs[actualIndex] = {
+                ...decryptedMsg,
                 text: decryptedMsg.text || prev[actualIndex].text,
                 fileUrl: prev[actualIndex].fileUrl, // PRESERVE LOCAL URL
                 fileName: prev[actualIndex].fileName,
@@ -603,10 +650,10 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
           const encryptedFileUrl = await encryptForBoth(uploadRes.fileUrl, recipientPublicKey, myPublicKey);
           const encryptedFileName = await encryptForBoth(originalName, recipientPublicKey, myPublicKey);
           const encryptedFileSize = await encryptForBoth(originalSize, recipientPublicKey, myPublicKey);
-          
+
           fileMetadata = encryptedMetadata;
           const payload = lastInput.trim() ? JSON.stringify({ text: finalMessage, fileMeta: fileMetadata }) : fileMetadata;
-          
+
           const response = await sendMessageApi(chat.id, payload, mappedType, undefined, true, clientMsgId, encryptedFileUrl, encryptedFileName, encryptedFileSize, false, undefined, currentReplyingTo?.id);
           setLocalMessages(prev => prev.map(m => m.id === clientMsgId ? { ...response, text: lastInput, fileUrl: currentPreview, fileName: originalName, fileSize: originalSize } : m));
         } else {
@@ -752,8 +799,8 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
       return;
     }
 
-    const filtered = fullChatList.filter(chat => 
-      chat.name?.toLowerCase().includes(forwardSearchQuery.toLowerCase()) || 
+    const filtered = fullChatList.filter(chat =>
+      chat.name?.toLowerCase().includes(forwardSearchQuery.toLowerCase()) ||
       chat.username?.toLowerCase().includes(forwardSearchQuery.toLowerCase())
     );
     setForwardSearchResults(filtered);
@@ -771,7 +818,7 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
       let isEncrypted = !!msg.isEncrypted;
 
       if (isEncrypted) {
-        const privateKey = await getLocalPrivateKey();
+        const privateKey = me?.id ? await getLocalPrivateKey(String(me.id)) : null;
         const [recipientPubKeyPem, myPubKeyPem] = await Promise.all([
           getPublicKeyApi(targetUser.username),
           getPublicKeyApi(me!.username)
@@ -787,9 +834,9 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
             const newFileMeta = await rewrapFileMeta(msg.fileMeta, privateKey, isOriginalSender, recipientPubKeyPem, myPubKeyPem);
             // Re-encrypt caption if present
             const reEncryptedText = content ? await encryptForBoth(content, recipientPubKeyPem, myPubKeyPem) : "";
-            content = JSON.stringify({ 
-               fileMeta: newFileMeta,
-               text: reEncryptedText 
+            content = JSON.stringify({
+              fileMeta: newFileMeta,
+              text: reEncryptedText
             });
           }
 
@@ -832,7 +879,7 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
       setIsForwardModalOpen(false);
       setForwardingMessage(null);
       setForwardSearchQuery("");
-      
+
       // Optionally navigate to the chat or just show success
       // navigate(`/chat/${targetUser.username}`);
     } catch (err) {
@@ -865,7 +912,7 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
 
   const loadMoreMessages = async () => {
     if (!chat?.username || !hasMore || isFetchingMore || isLoadingMessages) return;
-    
+
     setIsFetchingMore(true);
     const oldestMessageId = localMessages[0]?.id;
     const container = messagesContainerRef.current;
@@ -874,7 +921,7 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
     try {
       const data = await getMessagesApi(chat.username, oldestMessageId);
       if (data.messages && data.messages.length > 0) {
-        const privateKey = await getLocalPrivateKey();
+        const privateKey = me?.id ? await getLocalPrivateKey(String(me.id)) : null;
         const decryptedMessages = await Promise.all(data.messages.map(async (msg: any) => {
           let decryptedText = msg.text;
           let fileMeta = "";
@@ -913,7 +960,7 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
 
         setLocalMessages(prev => [...decryptedMessages, ...prev]);
         setHasMore(data.hasMore);
-        
+
         // Preserve scroll position after DOM update
         requestAnimationFrame(() => {
           if (container) {
@@ -964,7 +1011,7 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
     } else if (isNewMessage && isNearBottom) {
       scrollToBottom('smooth');
     }
-    
+
     prevMessagesLengthRef.current = localMessages.length;
   }, [localMessages, chat?.id, isFetchingMore]);
 
@@ -986,19 +1033,19 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
     return (
       <div className="flex-1 h-full bg-[hsl(var(--chat-bg))] flex flex-col items-center justify-center text-muted-foreground relative">
         {/* Background Pattern */}
-        <div 
+        <div
           className="absolute inset-0 opacity-[0.03] pointer-events-none bg-repeat"
           style={{ backgroundImage: `url('https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png')` }}
         />
-        
+
         <div className="w-[460px] text-center space-y-6 relative z-10">
           <div className="bg-accent/20 h-48 w-48 rounded-full mx-auto flex items-center justify-center border border-border/10">
-             <div className="relative">
-                <FontAwesomeIcon icon={faPaperPlane} className="h-20 w-20 text-primary opacity-20" />
-                <div className="absolute inset-0 flex items-center justify-center">
-                   <FontAwesomeIcon icon={faSearch} className="h-8 w-8 text-primary" />
-                </div>
-             </div>
+            <div className="relative">
+              <FontAwesomeIcon icon={faPaperPlane} className="h-20 w-20 text-primary opacity-20" />
+              <div className="absolute inset-0 flex items-center justify-center">
+                <FontAwesomeIcon icon={faSearch} className="h-8 w-8 text-primary" />
+              </div>
+            </div>
           </div>
           <div className="space-y-2">
             <h2 className="text-3xl font-light text-foreground">Select a user to start messaging</h2>
@@ -1024,8 +1071,8 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
       <div className="h-[60px] bg-[hsl(var(--chat-header-bg))] px-4 flex items-center justify-between shrink-0 border-b relative">
         {isSearching ? (
           <div className="flex-1 flex items-center gap-2 animate-in fade-in slide-in-from-right-4 duration-300">
-            <Button 
-              variant="ghost" 
+            <Button
+              variant="ghost"
               size="icon"
               className="h-8 w-8 rounded-full"
               onClick={() => {
@@ -1037,7 +1084,7 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
               <FontAwesomeIcon icon={faArrowLeft} className="text-muted-foreground h-4 w-4" />
             </Button>
             <div className="flex-1 relative">
-              <Input 
+              <Input
                 autoFocus
                 placeholder="Search messages..."
                 value={searchQuery}
@@ -1049,18 +1096,18 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
               <div className="flex items-center gap-1 text-xs text-muted-foreground mr-2">
                 <span>{searchMatchIndex + 1} of {searchResults.length}</span>
                 <div className="flex gap-1">
-                  <Button 
-                    variant="ghost" 
-                    size="icon" 
-                    className="h-7 w-7" 
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7"
                     onClick={() => navigateSearch('prev')}
                   >
                     <FontAwesomeIcon icon={faChevronDown} className="h-3 w-3 rotate-180" />
                   </Button>
-                  <Button 
-                    variant="ghost" 
-                    size="icon" 
-                    className="h-7 w-7" 
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7"
                     onClick={() => navigateSearch('next')}
                   >
                     <FontAwesomeIcon icon={faChevronDown} className="h-3 w-3" />
@@ -1068,8 +1115,8 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
                 </div>
               </div>
             )}
-            <Button 
-              variant="ghost" 
+            <Button
+              variant="ghost"
               size="icon"
               className="h-8 w-8 rounded-full"
               onClick={() => setSearchQuery("")}
@@ -1080,9 +1127,9 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
         ) : (
           <>
             <div className="flex items-center gap-1">
-              <Button 
-                variant="ghost" 
-                size="icon" 
+              <Button
+                variant="ghost"
+                size="icon"
                 className="h-9 w-9 rounded-full text-muted-foreground hover:text-primary hover:bg-primary/10 transition-all mr-1"
                 onClick={() => navigate('/')}
               >
@@ -1106,32 +1153,32 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
             </div>
             {!isLoadingMessages && (
               <div className="flex gap-5 text-muted-foreground items-center">
-                <FontAwesomeIcon 
-                  icon={faVideo} 
-                  className={cn("h-4 w-4 cursor-pointer hover:text-foreground", isBlocked && "opacity-20 cursor-not-allowed")} 
+                <FontAwesomeIcon
+                  icon={faVideo}
+                  className={cn("h-4 w-4 cursor-pointer hover:text-foreground", isBlocked && "opacity-20 cursor-not-allowed")}
                   onClick={() => !isBlocked && chat && onStartVideoCall?.(chat)}
                 />
-                <FontAwesomeIcon 
-                  icon={faPhone} 
-                  className={cn("h-4 w-4 cursor-pointer hover:text-foreground", isBlocked && "opacity-20 cursor-not-allowed")} 
+                <FontAwesomeIcon
+                  icon={faPhone}
+                  className={cn("h-4 w-4 cursor-pointer hover:text-foreground", isBlocked && "opacity-20 cursor-not-allowed")}
                   onClick={() => !isBlocked && chat && onStartAudioCall?.(chat)}
                 />
-                <FontAwesomeIcon 
-                  icon={faSearch} 
-                  className="h-4 w-4 cursor-pointer hover:text-foreground" 
+                <FontAwesomeIcon
+                  icon={faSearch}
+                  className="h-4 w-4 cursor-pointer hover:text-foreground"
                   onClick={() => setIsSearching(true)}
                 />
                 {!blockedByMe ? (
-                  <FontAwesomeIcon 
-                    icon={faBan} 
-                    className="h-4 w-4 cursor-pointer hover:text-destructive transition-colors" 
+                  <FontAwesomeIcon
+                    icon={faBan}
+                    className="h-4 w-4 cursor-pointer hover:text-destructive transition-colors"
                     title="Block User"
                     onClick={() => setIsBlockModalOpen(true)}
                   />
                 ) : (
-                  <FontAwesomeIcon 
-                    icon={faUnlock} 
-                    className="h-4 w-4 cursor-pointer text-primary hover:text-primary/80 transition-colors" 
+                  <FontAwesomeIcon
+                    icon={faUnlock}
+                    className="h-4 w-4 cursor-pointer text-primary hover:text-primary/80 transition-colors"
                     title="Unblock User"
                     onClick={() => setIsUnblockModalOpen(true)}
                   />
@@ -1154,8 +1201,8 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
             <Button variant="ghost" onClick={() => setIsBlockModalOpen(false)} disabled={isBlockingAction} className="flex-1">
               Cancel
             </Button>
-            <Button 
-              variant="destructive" 
+            <Button
+              variant="destructive"
               onClick={handleBlock}
               disabled={isBlockingAction}
               className="flex-1"
@@ -1178,8 +1225,8 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
             <Button variant="ghost" onClick={() => setIsUnblockModalOpen(false)} disabled={isBlockingAction} className="flex-1">
               Cancel
             </Button>
-            <Button 
-              variant="default" 
+            <Button
+              variant="default"
               onClick={handleUnblock}
               disabled={isBlockingAction}
               className="flex-1 bg-primary text-primary-foreground hover:bg-primary/90"
@@ -1202,8 +1249,8 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
             <Button variant="ghost" onClick={() => setIsAcceptModalOpen(false)} disabled={isBlockingAction} className="flex-1">
               Cancel
             </Button>
-            <Button 
-              className="flex-1 bg-primary text-primary-foreground hover:bg-primary/90" 
+            <Button
+              className="flex-1 bg-primary text-primary-foreground hover:bg-primary/90"
               onClick={() => {
                 handleAcceptRequest();
                 setIsAcceptModalOpen(false);
@@ -1224,12 +1271,12 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
               Forward Message
             </DialogTitle>
           </DialogHeader>
-          
+
           <div className="px-4 pb-4 space-y-4">
             <div className="relative">
               <FontAwesomeIcon icon={faSearch} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-xs" />
-              <Input 
-                placeholder="Search people to forward..." 
+              <Input
+                placeholder="Search people to forward..."
                 value={forwardSearchQuery}
                 onChange={(e) => setForwardSearchQuery(e.target.value)}
                 className="pl-9 bg-black/5 border-none focus-visible:ring-1 focus-visible:ring-primary/20 h-10"
@@ -1246,7 +1293,7 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
               ) : forwardSearchResults.length > 0 ? (
                 <div className="flex flex-col gap-1">
                   {forwardSearchResults.map(user => (
-                    <div 
+                    <div
                       key={user.id}
                       onClick={() => !isForwarding && handleForward(user)}
                       className={cn(
@@ -1263,22 +1310,22 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
                         <p className="text-[11px] text-muted-foreground truncate">@{user.username}</p>
                       </div>
                       <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center text-primary opacity-0 group-hover:opacity-100 transition-all scale-75 group-hover:scale-100">
-                         {isForwarding ? (
-                           <FontAwesomeIcon icon={faSpinner} className="text-xs animate-spin" />
-                         ) : (
-                           <FontAwesomeIcon icon={faPaperPlane} className="text-xs" />
-                         )}
+                        {isForwarding ? (
+                          <FontAwesomeIcon icon={faSpinner} className="text-xs animate-spin" />
+                        ) : (
+                          <FontAwesomeIcon icon={faPaperPlane} className="text-xs" />
+                        )}
                       </div>
                     </div>
                   ))}
                 </div>
               ) : forwardSearchQuery ? (
                 <div className="text-center py-8 text-muted-foreground">
-                   <p className="text-sm">No users found</p>
+                  <p className="text-sm">No users found</p>
                 </div>
               ) : (
                 <div className="text-center py-8 text-muted-foreground">
-                   <p className="text-xs">Search for contacts to forward this message</p>
+                  <p className="text-xs">Search for contacts to forward this message</p>
                 </div>
               )}
             </div>
@@ -1288,11 +1335,11 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
 
       {/* Messages Area */}
       <div className="flex-1 relative overflow-hidden flex flex-col">
-        <div 
+        <div
           className="absolute inset-0 opacity-[0.06] pointer-events-none bg-repeat"
           style={{ backgroundImage: `url('https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png')` }}
         />
-        <div 
+        <div
           ref={messagesContainerRef}
           className="flex-1 overflow-y-auto px-4 py-4 flex flex-col"
           onScroll={handleScroll}
@@ -1309,45 +1356,45 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
             <ChatWindowSkeleton />
           ) : (
             <div className="flex flex-col w-full gap-1">
-               {localMessages.map(msg => (
-                  <div 
-                    key={msg.id} 
-                    id={`msg-${msg.id}`}
-                    className={cn(
-                      "transition-all duration-500 rounded-lg p-1",
-                      searchResults[searchMatchIndex] === msg.id && "bg-primary/10 ring-1 ring-primary/20",
-                      highlightedMessageId === msg.id && "bg-primary/20 ring-2 ring-primary/40 scale-[1.02] shadow-lg"
-                    )}
-                  >
-                    <MessageBubble 
-                      message={msg} 
-                      isMe={String(msg.senderId) === String(me?.id)}
-                      otherName={chat?.username}
-                      onEdit={(m) => {
-                        setEditingMessage(m);
-                        setInputText(m.text || "");
-                      }}
-                      onDelete={async (id) => {
-                        setDeletingMessageId(id);
-                        try {
-                          await deleteMessageApi(id);
-                        } catch (err) {
-                          console.error('Failed to delete message:', err);
-                        } finally {
-                          setDeletingMessageId(null);
-                        }
-                      }}
-                      isDeleting={deletingMessageId === msg.id}
-                      onForward={(m) => {
-                        setForwardingMessage(m);
-                        setIsForwardModalOpen(true);
-                      }}
-                      onReply={(m) => setReplyingToMessage(m)}
-                      onScrollTo={scrollToMessage}
-                    />
+              {localMessages.map(msg => (
+                <div
+                  key={msg.id}
+                  id={`msg-${msg.id}`}
+                  className={cn(
+                    "transition-all duration-500 rounded-lg p-1",
+                    searchResults[searchMatchIndex] === msg.id && "bg-primary/10 ring-1 ring-primary/20",
+                    highlightedMessageId === msg.id && "bg-primary/20 ring-2 ring-primary/40 scale-[1.02] shadow-lg"
+                  )}
+                >
+                  <MessageBubble
+                    message={msg}
+                    isMe={String(msg.senderId) === String(me?.id)}
+                    otherName={chat?.username}
+                    onEdit={(m) => {
+                      setEditingMessage(m);
+                      setInputText(m.text || "");
+                    }}
+                    onDelete={async (id) => {
+                      setDeletingMessageId(id);
+                      try {
+                        await deleteMessageApi(id);
+                      } catch (err) {
+                        console.error('Failed to delete message:', err);
+                      } finally {
+                        setDeletingMessageId(null);
+                      }
+                    }}
+                    isDeleting={deletingMessageId === msg.id}
+                    onForward={(m) => {
+                      setForwardingMessage(m);
+                      setIsForwardModalOpen(true);
+                    }}
+                    onReply={(m) => setReplyingToMessage(m)}
+                    onScrollTo={scrollToMessage}
+                  />
                 </div>
               ))}
-              
+
               {isTyping && (
                 <div className="flex justify-start mb-4 animate-in fade-in slide-in-from-left-4 duration-500">
                   <div className="bg-[hsl(var(--bubble-other))] px-5 py-4 rounded-2xl rounded-tl-none shadow-md flex items-center gap-1.5 border border-border/50">
@@ -1413,24 +1460,24 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
             </div>
           ) : chatStatus === 'PENDING' && requesterId && requesterId !== String(me?.id) && localMessages.length > 0 ? (
             <div className="p-8 flex flex-col items-center justify-center bg-background/80 backdrop-blur-md animate-in slide-in-from-bottom-4 duration-500 border-t">
-               <div className="w-16 h-16 bg-primary/10 rounded-full flex items-center justify-center mb-4">
-                  <Avatar className="h-12 w-12 border-2 border-primary/20">
-                    <AvatarImage src={chat?.avatar} />
-                    <AvatarFallback>{chat?.name?.charAt(0) || chat?.username?.charAt(0)}</AvatarFallback>
-                  </Avatar>
-               </div>
-               <h3 className="text-lg font-bold mb-1">{chat?.name || chat?.username}</h3>
-               <p className="text-sm text-muted-foreground mb-6 text-center max-w-[280px]">
-                 Wants to connect with you. They won't know you've seen their message until you accept.
-               </p>
-               <div className="flex gap-3 w-full max-w-[320px]">
-                  <Button variant="outline" className="flex-1 rounded-full border-destructive/20 text-destructive hover:bg-destructive/10" onClick={() => setIsBlockModalOpen(true)}>
-                    Block
-                  </Button>
-                  <Button className="flex-1 rounded-full bg-primary hover:bg-primary/90 text-primary-foreground shadow-lg shadow-primary/20" onClick={() => setIsAcceptModalOpen(true)}>
-                    Accept
-                  </Button>
-               </div>
+              <div className="w-16 h-16 bg-primary/10 rounded-full flex items-center justify-center mb-4">
+                <Avatar className="h-12 w-12 border-2 border-primary/20">
+                  <AvatarImage src={chat?.avatar} />
+                  <AvatarFallback>{chat?.name?.charAt(0) || chat?.username?.charAt(0)}</AvatarFallback>
+                </Avatar>
+              </div>
+              <h3 className="text-lg font-bold mb-1">{chat?.name || chat?.username}</h3>
+              <p className="text-sm text-muted-foreground mb-6 text-center max-w-[280px]">
+                Wants to connect with you. They won't know you've seen their message until you accept.
+              </p>
+              <div className="flex gap-3 w-full max-w-[320px]">
+                <Button variant="outline" className="flex-1 rounded-full border-destructive/20 text-destructive hover:bg-destructive/10" onClick={() => setIsBlockModalOpen(true)}>
+                  Block
+                </Button>
+                <Button className="flex-1 rounded-full bg-primary hover:bg-primary/90 text-primary-foreground shadow-lg shadow-primary/20" onClick={() => setIsAcceptModalOpen(true)}>
+                  Accept
+                </Button>
+              </div>
             </div>
           ) : (
             <>
@@ -1476,9 +1523,9 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
                       </span>
                       <div className="flex-1 h-8 flex items-center justify-center overflow-hidden">
                         <div className="flex gap-0.5 items-center h-full">
-                           {[...Array(20)].map((_, i) => (
-                             <div key={i} className="w-0.5 bg-primary/40 rounded-full" style={{ height: `${Math.random() * 80 + 20}%`, animation: `pulse 1s infinite ${i * 0.05}s` }}></div>
-                           ))}
+                          {[...Array(20)].map((_, i) => (
+                            <div key={i} className="w-0.5 bg-primary/40 rounded-full" style={{ height: `${Math.random() * 80 + 20}%`, animation: `pulse 1s infinite ${i * 0.05}s` }}></div>
+                          ))}
                         </div>
                       </div>
                     </div>
@@ -1531,20 +1578,20 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
                       <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-primary transition-colors" onClick={() => handleFileClick('file')}>
                         <FontAwesomeIcon icon={faPaperclip} className="h-5 w-5" />
                       </Button>
-                      
+
                       <div className="relative">
-                        <Button 
-                          variant="ghost" 
-                          size="icon" 
+                        <Button
+                          variant="ghost"
+                          size="icon"
                           className={cn("text-muted-foreground hover:text-primary transition-colors", isEmojiPickerOpen && "text-primary")}
                           onClick={() => setIsEmojiPickerOpen(!isEmojiPickerOpen)}
                         >
                           <FontAwesomeIcon icon={faFaceSmile} className="h-5 w-5" />
                         </Button>
-                        
+
                         {isEmojiPickerOpen && (
                           <div className="absolute bottom-full left-0 mb-4 z-50" ref={pickerRef}>
-                            <EmojiPicker 
+                            <EmojiPicker
                               onEmojiClick={handleEmojiClick}
                               theme={Theme.AUTO}
                               width={320}
@@ -1556,7 +1603,7 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
                     </div>
 
                     <form onSubmit={handleSendMessage} className="flex-1 flex items-center gap-2">
-                      <Input 
+                      <Input
                         placeholder="Type a message..."
                         value={inputText}
                         onChange={(e) => {
@@ -1583,10 +1630,10 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
                         }}
                         className="flex-1 bg-background border-none focus-visible:ring-1 focus-visible:ring-primary/20 h-10 px-4 rounded-full"
                       />
-                      
-                      <Button 
-                        type="submit" 
-                        size="icon" 
+
+                      <Button
+                        type="submit"
+                        size="icon"
                         disabled={!inputText.trim() && !selectedFile}
                         className={cn(
                           "rounded-full h-10 w-10 transition-all duration-300",
@@ -1609,11 +1656,11 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
           )}
         </div>
       )}
-      
-      <input 
-        type="file" 
-        ref={fileInputRef} 
-        className="hidden" 
+
+      <input
+        type="file"
+        ref={fileInputRef}
+        className="hidden"
         onChange={handleFileSelect}
       />
     </div>
