@@ -628,7 +628,7 @@ export class ChatService {
         receiverId: message.receiverId.toString(),
         isDeleted: true,
         isEncrypted: false,
-        sidebarText: '🚫 deleted a message'
+        sidebarText: message.isForwarded ? '🚫 Content unavailable' : '🚫 deleted a message'
       };
 
       this.chatGateway.sendMessageToUser(message.receiverId, 'messageDeleted', socketPayload);

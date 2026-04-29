@@ -183,6 +183,12 @@ export const MessageBubble = React.memo(({ message, isMe, onEdit, onDelete, onFo
               realFileName = await decryptMessage(message.fileName, privateKey, isSender);
             }
 
+            // Decrypt fileSize if it's an encrypted payload
+            let realFileSize = message.fileSize || "";
+            if (message.fileSize && isEncryptedPayload(message.fileSize)) {
+              realFileSize = await decryptMessage(message.fileSize, privateKey, isSender);
+            }
+
             if (realFileUrl && !realFileUrl.startsWith('[Unable') && fileMeta && isMounted) {
               console.log("DEBUG: Fetching blob from", realFileUrl);
               const response = await fetch(realFileUrl);
@@ -197,7 +203,7 @@ export const MessageBubble = React.memo(({ message, isMe, onEdit, onDelete, onFo
                 setDecryptedUrl(url);
                 setDecryptedMeta({ 
                   fileName: decrypted.fileName || realFileName, 
-                  fileSize: decrypted.fileSize 
+                  fileSize: decrypted.fileSize || realFileSize 
                 });
               }
             }

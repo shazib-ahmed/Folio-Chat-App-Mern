@@ -787,10 +787,25 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
             });
           }
 
-          // Re-encrypt preview fields for the new recipient
-          if (fileUrl) fileUrl = await encryptForBoth(fileUrl, recipientPubKeyPem, myPubKeyPem);
-          if (fileName) fileName = await encryptForBoth(fileName, recipientPubKeyPem, myPubKeyPem);
-          if (fileSize) fileSize = await encryptForBoth(fileSize, recipientPubKeyPem, myPubKeyPem);
+          // 2. Decrypt existing metadata before re-encrypting (to avoid double-encryption)
+          let plainFileName = fileName;
+          let plainFileSize = fileSize;
+          let plainFileUrl = fileUrl;
+
+          if (fileName && isEncryptedPayload(fileName)) {
+            plainFileName = await decryptMessage(fileName, privateKey, isOriginalSender);
+          }
+          if (fileSize && isEncryptedPayload(fileSize)) {
+            plainFileSize = await decryptMessage(fileSize, privateKey, isOriginalSender);
+          }
+          if (fileUrl && isEncryptedPayload(fileUrl)) {
+            plainFileUrl = await decryptMessage(fileUrl, privateKey, isOriginalSender);
+          }
+
+          // 3. Re-encrypt for the new recipient
+          if (plainFileUrl) fileUrl = await encryptForBoth(plainFileUrl, recipientPubKeyPem, myPubKeyPem);
+          if (plainFileName) fileName = await encryptForBoth(plainFileName, recipientPubKeyPem, myPubKeyPem);
+          if (plainFileSize) fileSize = await encryptForBoth(plainFileSize, recipientPubKeyPem, myPubKeyPem);
         }
       }
 
