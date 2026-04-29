@@ -520,6 +520,7 @@ export class ChatService {
         message: {
           contains: query,
         },
+        isEncrypted: false,
         deletedAt: null
       },
       orderBy: {

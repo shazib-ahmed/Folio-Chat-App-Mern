@@ -224,13 +224,23 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
     if (searchQuery.trim().length >= 2 && chat?.username) {
       searchTimeoutRef.current = setTimeout(async () => {
         try {
-          const results = await searchMessagesApi(chat.username, searchQuery, controller.signal);
-          const resultIds = results.map((r: any) => r.id);
-          setSearchResults(resultIds);
-          setSearchMatchIndex(resultIds.length > 0 ? 0 : -1);
+          // 1. Search locally through decrypted messages (most accurate for E2EE)
+          const localResults = localMessages
+            .filter(m => !m.isDeleted && m.text?.toLowerCase().includes(searchQuery.toLowerCase()))
+            .map(m => m.id);
 
-          if (resultIds.length > 0) {
-            const firstId = resultIds[0];
+          // 2. Search backend (for old plain-text messages)
+          const backendResults = await searchMessagesApi(chat.username, searchQuery, controller.signal);
+          const backendResultIds = backendResults.map((r: any) => r.id);
+
+          // 3. Combine and deduplicate
+          const combinedIds = Array.from(new Set([...localResults, ...backendResultIds]));
+          
+          setSearchResults(combinedIds);
+          setSearchMatchIndex(combinedIds.length > 0 ? 0 : -1);
+
+          if (combinedIds.length > 0) {
+            const firstId = combinedIds[0];
             if (localMessages.some(m => m.id === firstId)) {
               scrollToMessage(firstId);
             }
