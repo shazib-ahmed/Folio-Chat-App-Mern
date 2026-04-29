@@ -5,7 +5,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/shared/ui/avatar";
 import { Input } from "@/shared/ui/input";
 import { Button } from "@/shared/ui/button";
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faBan, faSearch, faFaceSmile, faPaperclip, faMicrophone, faPaperPlane, faArrowLeft, faPhone, faVideo, faXmark, faChevronDown, faTrash, faUnlock, faPen, faShare, faSpinner } from '@fortawesome/free-solid-svg-icons';
+import { faBan, faSearch, faFaceSmile, faPaperclip, faMicrophone, faPaperPlane, faArrowLeft, faPhone, faVideo, faXmark, faChevronDown, faTrash, faUnlock, faPen, faShare, faSpinner, faReply } from '@fortawesome/free-solid-svg-icons';
 import { MessageBubble } from "./MessageBubble";
 import { Chat, Message } from "../types";
 import { cn } from "@/shared/lib/utils";
@@ -58,6 +58,9 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
   const [hasMore, setHasMore] = useState(false);
   const [isFetchingMore, setIsFetchingMore] = useState(false);
+  const [replyingToMessage, setReplyingToMessage] = useState<Message | null>(null);
+  const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
+
   const [searchResults, setSearchResults] = useState<string[]>([]);
   const [searchMatchIndex, setSearchMatchIndex] = useState(-1);
   const [recipientPublicKey, setRecipientPublicKey] = useState<string | null>(null);
@@ -162,7 +165,8 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
             fileUrl: decryptedFileUrl, 
             fileName: decryptedFileName, 
             fileSize: decryptedFileSize,
-            fileMeta 
+            fileMeta,
+            replyTo: msg.replyTo // Explicitly preserve replyTo
           };
 
         }));
@@ -225,9 +229,8 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
     const element = document.getElementById(`msg-${id}`);
     if (element) {
       element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      // Add a temporary highlight effect
-      element.classList.add('bg-primary/20');
-      setTimeout(() => element.classList.remove('bg-primary/20'), 2000);
+      setHighlightedMessageId(id);
+      setTimeout(() => setHighlightedMessageId(null), 2000);
     }
   };
 
@@ -403,7 +406,8 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
           fileUrl: decryptedFileUrl,
           fileName: decryptedFileName,
           fileSize: decryptedFileSize,
-          fileMeta 
+          fileMeta,
+          replyTo: msg.replyTo // Explicitly preserve replyTo from socket payload
         };
 
 
@@ -574,8 +578,10 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
     // 2. CLEAR INPUTS
     const lastInput = inputText;
     const lastFile = fileToUpload;
+    const currentReplyingTo = replyingToMessage;
     setInputText("");
     removeSelectedFile();
+    setReplyingToMessage(null);
     if (fileToUpload) setIsUploading(true);
 
     // 3. SENDING LOGIC
@@ -601,17 +607,17 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
           fileMetadata = encryptedMetadata;
           const payload = lastInput.trim() ? JSON.stringify({ text: finalMessage, fileMeta: fileMetadata }) : fileMetadata;
           
-          const response = await sendMessageApi(chat.id, payload, mappedType, undefined, true, clientMsgId, encryptedFileUrl, encryptedFileName, encryptedFileSize);
+          const response = await sendMessageApi(chat.id, payload, mappedType, undefined, true, clientMsgId, encryptedFileUrl, encryptedFileName, encryptedFileSize, false, undefined, currentReplyingTo?.id);
           setLocalMessages(prev => prev.map(m => m.id === clientMsgId ? { ...response, text: lastInput, fileUrl: currentPreview, fileName: originalName, fileSize: originalSize } : m));
         } else {
           // Text only
-          const response = await sendMessageApi(chat.id, finalMessage, 'TEXT', undefined, true, clientMsgId);
+          const response = await sendMessageApi(chat.id, finalMessage, 'TEXT', undefined, true, clientMsgId, undefined, undefined, undefined, false, undefined, currentReplyingTo?.id);
           setLocalMessages(prev => prev.map(m => m.id === clientMsgId ? { ...response, text: lastInput } : m));
         }
 
       } else {
         // --- PLAIN FLOW ---
-        const response = await sendMessageApi(chat.id, lastInput, mappedType, lastFile, false, clientMsgId);
+        const response = await sendMessageApi(chat.id, lastInput, mappedType, lastFile, false, clientMsgId, undefined, undefined, undefined, false, undefined, currentReplyingTo?.id);
         setLocalMessages(prev => prev.map(m => m.id === clientMsgId ? { ...response, fileUrl: currentPreview, fileName: originalName, fileSize: originalSize } : m));
       }
     } catch (err: any) {
@@ -1304,38 +1310,41 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
           ) : (
             <div className="flex flex-col w-full gap-1">
                {localMessages.map(msg => (
-                <div 
-                  key={msg.id} 
-                  id={`msg-${msg.id}`}
-                  className={cn(
-                    "transition-colors duration-500 rounded-lg",
-                    searchResults[searchMatchIndex] === msg.id && "bg-primary/10 ring-1 ring-primary/20"
-                  )}
-                >
-                  <MessageBubble 
-                    message={msg} 
-                    isMe={String(msg.senderId) === String(me?.id)}
-                    otherName={chat?.username}
-                    onEdit={(m) => {
-                      setEditingMessage(m);
-                      setInputText(m.text || "");
-                    }}
-                    onDelete={async (id) => {
-                      setDeletingMessageId(id);
-                      try {
-                        await deleteMessageApi(id);
-                      } catch (err) {
-                        console.error('Failed to delete message:', err);
-                      } finally {
-                        setDeletingMessageId(null);
-                      }
-                    }}
-                    isDeleting={deletingMessageId === msg.id}
-                    onForward={(m) => {
-                      setForwardingMessage(m);
-                      setIsForwardModalOpen(true);
-                    }}
-                  />
+                  <div 
+                    key={msg.id} 
+                    id={`msg-${msg.id}`}
+                    className={cn(
+                      "transition-all duration-500 rounded-lg p-1",
+                      searchResults[searchMatchIndex] === msg.id && "bg-primary/10 ring-1 ring-primary/20",
+                      highlightedMessageId === msg.id && "bg-primary/20 ring-2 ring-primary/40 scale-[1.02] shadow-lg"
+                    )}
+                  >
+                    <MessageBubble 
+                      message={msg} 
+                      isMe={String(msg.senderId) === String(me?.id)}
+                      otherName={chat?.username}
+                      onEdit={(m) => {
+                        setEditingMessage(m);
+                        setInputText(m.text || "");
+                      }}
+                      onDelete={async (id) => {
+                        setDeletingMessageId(id);
+                        try {
+                          await deleteMessageApi(id);
+                        } catch (err) {
+                          console.error('Failed to delete message:', err);
+                        } finally {
+                          setDeletingMessageId(null);
+                        }
+                      }}
+                      isDeleting={deletingMessageId === msg.id}
+                      onForward={(m) => {
+                        setForwardingMessage(m);
+                        setIsForwardModalOpen(true);
+                      }}
+                      onReply={(m) => setReplyingToMessage(m)}
+                      onScrollTo={scrollToMessage}
+                    />
                 </div>
               ))}
               
@@ -1497,6 +1506,23 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
                           setEditingMessage(null);
                           setInputText("");
                         }}>
+                          <FontAwesomeIcon icon={faXmark} className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    )}
+
+                    {replyingToMessage && (
+                      <div className="absolute bottom-full left-0 right-0 bg-background/80 backdrop-blur-md border-t px-4 py-2 flex items-center justify-between animate-in slide-in-from-bottom-2 duration-300 z-10">
+                        <div className="flex items-center gap-2 overflow-hidden">
+                          <FontAwesomeIcon icon={faReply} className="text-primary text-xs shrink-0" />
+                          <div className="min-w-0">
+                            <p className="text-[10px] font-bold text-primary uppercase tracking-wider">Replying to</p>
+                            <p className="text-xs truncate text-muted-foreground">
+                              {replyingToMessage.isDeleted ? "🚫 deleted a message" : (replyingToMessage.text || (replyingToMessage.fileUrl ? "Attachment" : ""))}
+                            </p>
+                          </div>
+                        </div>
+                        <Button variant="ghost" size="icon" className="h-6 w-6 rounded-full" onClick={() => setReplyingToMessage(null)}>
                           <FontAwesomeIcon icon={faXmark} className="h-3 w-3" />
                         </Button>
                       </div>

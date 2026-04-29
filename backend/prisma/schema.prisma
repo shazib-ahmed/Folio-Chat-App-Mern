@@ -79,6 +79,7 @@ model Message {
   isEdited       Boolean     @default(false)
   isForwarded    Boolean     @default(false)
   sourceMessageId Int?
+  replyToId      Int?
   
   createdAt      DateTime    @default(now())
   updatedAt      DateTime    @updatedAt
@@ -89,6 +90,8 @@ model Message {
   chatRoom       ChatRoom    @relation(fields: [chatRoomId], references: [id])
   sourceMessage  Message?    @relation("ForwardRelation", fields: [sourceMessageId], references: [id])
   forwards       Message[]   @relation("ForwardRelation")
+  replyTo        Message?    @relation("ReplyRelation", fields: [replyToId], references: [id])
+  replies        Message[]   @relation("ReplyRelation")
 
   @@index([chatRoomId, id])
 }

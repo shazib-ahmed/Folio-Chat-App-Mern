@@ -30,6 +30,13 @@ export interface Message {
   createdAt?: string;
   fileMeta?: string;
   isDeleted?: boolean;
+  replyTo?: {
+    id: string;
+    senderId: string;
+    text?: string;
+    messageType?: 'TEXT' | 'IMAGE' | 'VIDEO' | 'AUDIO' | 'FILE';
+    isEncrypted?: boolean;
+  };
 }
 
 

@@ -33,9 +33,10 @@ export class ChatService {
     providedFileName?: string,
     providedFileSize?: string,
     isForwarded: boolean = false,
-    sourceMessageId?: number
+    sourceMessageId?: number,
+    replyToId?: number
   ) {
-    console.log('DEBUG: sendMessage incoming:', { isEncrypted, isForwarded, sourceMessageId });
+    console.log('DEBUG: sendMessage incoming:', { isEncrypted, isForwarded, sourceMessageId, replyToId });
     
     let fileUrl: string | null = providedFileUrl || null;
     let fileName: string | null = providedFileName || null;
@@ -62,11 +63,13 @@ export class ChatService {
         chatRoomId: chatRoom.id,
         isEncrypted,
         isForwarded,
-        sourceMessageId
+        sourceMessageId,
+        replyToId
       },
       include: {
         sender: true,
         receiver: true,
+        replyTo: true
       }
     });
 
@@ -87,6 +90,13 @@ export class ChatService {
       isForwarded: message.isForwarded,
       createdAt: message.createdAt.toISOString(),
       clientMsgId,
+      replyTo: message.replyTo ? {
+        id: message.replyTo.id.toString(),
+        senderId: message.replyTo.senderId.toString(),
+        text: message.replyTo.deletedAt ? "🚫 deleted a message" : message.replyTo.message,
+        messageType: message.replyTo.messageType,
+        isEncrypted: message.replyTo.deletedAt ? false : message.replyTo.isEncrypted
+      } : null,
 
       sender: {
         id: message.sender.id.toString(),
@@ -226,6 +236,9 @@ export class ChatService {
       },
       orderBy: {
         id: 'desc'
+      },
+      include: {
+        replyTo: true
       }
     });
 
@@ -255,6 +268,13 @@ export class ChatService {
           isForwarded: msg.isForwarded,
           isDeleted,
           createdAt: msg.createdAt.toISOString(),
+          replyTo: msg.replyTo ? {
+            id: msg.replyTo.id.toString(),
+            senderId: msg.replyTo.senderId.toString(),
+            text: msg.replyTo.deletedAt ? "🚫 deleted a message" : msg.replyTo.message,
+            messageType: msg.replyTo.messageType,
+            isEncrypted: msg.replyTo.deletedAt ? false : msg.replyTo.isEncrypted
+          } : null
         };
       }),
 

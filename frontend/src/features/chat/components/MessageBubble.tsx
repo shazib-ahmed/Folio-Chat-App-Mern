@@ -2,7 +2,7 @@ import React, { useState, useRef } from 'react';
 import { cn } from "@/shared/lib/utils";
 import { Message } from "../types";
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faCheckDouble, faFileLines, faDownload, faClock, faPlay, faPause, faMicrophone, faXmark, faPen, faEllipsisVertical, faTrash, faShare } from '@fortawesome/free-solid-svg-icons';
+import { faCheckDouble, faFileLines, faDownload, faClock, faPlay, faPause, faMicrophone, faXmark, faPen, faEllipsisVertical, faTrash, faShare, faReply } from '@fortawesome/free-solid-svg-icons';
 import { Button } from '@/shared/ui/button';
 import {
   DropdownMenu,
@@ -10,6 +10,8 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/shared/ui/dropdown-menu";
+import { useSelector } from 'react-redux';
+import { RootState } from '@/app/store';
 import { decryptFile, getLocalPrivateKey, decryptMessage, isEncryptedPayload } from '@/shared/lib/cryptoUtils';
 
 import { Skeleton } from '@/shared/ui/skeleton';
@@ -20,6 +22,8 @@ interface MessageBubbleProps {
   onEdit?: (message: Message) => void;
   onDelete?: (messageId: string) => void;
   onForward?: (message: Message) => void;
+  onReply?: (message: Message) => void;
+  onScrollTo?: (messageId: string) => void;
   otherName?: string;
   isDeleting?: boolean;
 }
@@ -108,11 +112,13 @@ const VoiceMessage = React.memo(({ url, isMe }: { url: string; isMe?: boolean })
 // Helpers to hide raw encrypted JSON strings from UI
 const sanitizeValue = (val?: string) => isEncryptedPayload(val) ? null : val;
 
-export const MessageBubble = React.memo(({ message, isMe, onEdit, onDelete, onForward, otherName, isDeleting }: MessageBubbleProps) => {
+export const MessageBubble = React.memo(({ message, isMe, onEdit, onDelete, onForward, onReply, onScrollTo, otherName, isDeleting }: MessageBubbleProps) => {
+  const { user: me } = useSelector((state: RootState) => state.auth);
   const [isImageModalOpen, setIsImageModalOpen] = useState(false);
   const [decryptedUrl, setDecryptedUrl] = useState<string | null>(null);
   const [isDecrypting, setIsDecrypting] = useState(false);
   const [decryptedText, setDecryptedText] = useState<string | null>(null);
+  const [decryptedReplyText, setDecryptedReplyText] = useState<string | null>(null);
   const [decryptedMeta, setDecryptedMeta] = useState<{ fileName?: string; fileSize?: string }>({});
   const [lastBlobUrl, setLastBlobUrl] = useState<string | null>(null);
   
@@ -208,6 +214,25 @@ export const MessageBubble = React.memo(({ message, isMe, onEdit, onDelete, onFo
               }
             }
           }
+
+          // 3. Decrypt replyTo text if exists
+          if (message.replyTo?.text) {
+            let replyCipherText = message.replyTo.text;
+            if (replyCipherText.startsWith('{')) {
+              try {
+                const parsed = JSON.parse(replyCipherText);
+                if (parsed.text) replyCipherText = parsed.text;
+              } catch (e) {}
+            }
+
+            if (isEncryptedPayload(replyCipherText)) {
+              const isOriginalReplySender = String(message.replyTo.senderId) === String(me?.id);
+              const decryptedReply = await decryptMessage(replyCipherText, privateKey, isOriginalReplySender);
+              if (isMounted) setDecryptedReplyText(decryptedReply);
+            } else if (isMounted) {
+              setDecryptedReplyText(replyCipherText);
+            }
+          }
         } catch (err) {
           console.error("DEBUG: Decryption error:", err);
         } finally {
@@ -223,7 +248,7 @@ export const MessageBubble = React.memo(({ message, isMe, onEdit, onDelete, onFo
         window.URL.revokeObjectURL(currentBlobUrl);
       }
     };
-  }, [message.id, message.fileUrl, message.fileMeta, message.text, message.fileName, message.fileSize, message.isEncrypted, message.messageType, isMe]);
+  }, [message.id, message.fileUrl, message.fileMeta, message.text, message.fileName, message.fileSize, message.isEncrypted, message.messageType, message.replyTo?.text, message.replyTo?.senderId, isMe, me?.id]);
 
 
   const handleDownload = async (e: React.MouseEvent, url: string, fileName: string) => {
@@ -288,6 +313,29 @@ export const MessageBubble = React.memo(({ message, isMe, onEdit, onDelete, onFo
           </div>
         ) : (
           <>
+            {/* Reply Quote */}
+            {message.replyTo && (
+              <div 
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onScrollTo?.(message.replyTo!.id);
+                }}
+                className={cn(
+                  "mb-2 p-2 rounded-md border-l-4 bg-black/5 dark:bg-white/5 cursor-pointer hover:bg-black/10 dark:hover:bg-white/10 transition-colors",
+                  isMe ? "border-white/40" : "border-primary/40"
+                )}
+              >
+                <p className={cn(
+                  "text-[10px] font-bold mb-0.5",
+                  isMe ? "text-white/80" : "text-primary/80"
+                )}>
+                  {String(message.replyTo.senderId) === String(me?.id) ? "You" : (otherName || "User")}
+                </p>
+                <p className="text-xs truncate opacity-70 italic line-clamp-1">
+                  {decryptedReplyText || (message.replyTo.isEncrypted && !decryptedReplyText ? "🔒 Encrypted Message" : (message.replyTo.text || "Attachment"))}
+                </p>
+              </div>
+            )}
             {isDeleting && (
               <div className="absolute inset-0 bg-background/40 backdrop-blur-[1px] z-[60] flex items-center justify-center rounded-lg">
                 <div className="w-5 h-5 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
@@ -471,6 +519,10 @@ export const MessageBubble = React.memo(({ message, isMe, onEdit, onDelete, onFo
                   <span className="text-xs">Delete</span>
                 </DropdownMenuItem>
               )}
+              <DropdownMenuItem onClick={() => onReply?.(message)} className="gap-2 cursor-pointer text-primary focus:text-primary">
+                <FontAwesomeIcon icon={faReply} className="h-3 w-3" />
+                <span className="text-xs">Reply</span>
+              </DropdownMenuItem>
               <DropdownMenuItem onClick={() => onForward?.(message)} className="gap-2 cursor-pointer text-sky-500 focus:text-sky-500">
                 <FontAwesomeIcon icon={faShare} className="h-3 w-3" />
                 <span className="text-xs">Forward</span>
