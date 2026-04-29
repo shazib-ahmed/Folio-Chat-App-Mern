@@ -25,8 +25,14 @@ export interface Message {
     size?: string;
   };
   isEncrypted?: boolean;
+  isEdited?: boolean;
+  isForwarded?: boolean;
+  createdAt?: string;
   fileMeta?: string;
+  isDeleted?: boolean;
 }
+
+
 
 export interface Chat {
   id: string;
@@ -34,9 +40,11 @@ export interface Chat {
   username: string;
   avatar: string;
   lastMessage?: string;
+  lastMessageId?: string;
   lastMessageSenderId?: string;
   lastMessageType?: 'TEXT' | 'IMAGE' | 'VIDEO' | 'AUDIO' | 'FILE';
   isEncrypted?: boolean;
+  isForwarded?: boolean;
   lastMessageTime?: string;
   unreadCount?: number;
   online?: boolean;

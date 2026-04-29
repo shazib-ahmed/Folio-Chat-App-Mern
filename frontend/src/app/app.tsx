@@ -18,7 +18,7 @@ import { ProtectedRoute, PublicRoute } from '@/routes/ProtectedRoute';
 import { useDispatch, useSelector } from 'react-redux';
 import { RootState, AppDispatch } from '@/app/store';
 import { initiateSocketConnection, disconnectSocket, subscribeToMessages, getSocket } from '@/shared/lib/socket';
-import { fetchChatList, updateChatLastMessage, setTypingStatus, setUserStatus, updateChatStatus } from '@/features/chat/chatSlice';
+import { fetchChatList, updateChatLastMessage, setTypingStatus, setUserStatus, updateChatStatus, updateChatPreview } from '@/features/chat/chatSlice';
 import { getUserByUsernameApi, setPublicKeyApi, getPublicKeyApi } from '@/features/chat/chatService';
 import { generateE2EEKeys, savePrivateKey, exportPublicKey, getLocalPrivateKey } from '@/shared/lib/cryptoUtils';
 
@@ -110,19 +110,8 @@ function ChatLayout() {
 				const sidebarChatId = isMine ? msg.receiverId : msg.senderId;
 
 				if (sidebarChatId) {
-					let displayMessage = msg.sidebarText || msg.text || '';
+					const displayMessage = (msg.isEncrypted && msg.text) ? msg.text : (msg.sidebarText || msg.text || '');
 					
-					// Handle E2EE file/audio display in sidebar
-					if (msg.isEncrypted && msg.messageType !== 'TEXT') {
-						const typeLabels: Record<string, string> = {
-							'IMAGE': '📷 Photo',
-							'VIDEO': '🎥 Video',
-							'AUDIO': '🎵 Audio',
-							'FILE': '📄 File'
-						};
-						displayMessage = typeLabels[msg.messageType] || '📄 Attachment';
-					}
-
 					dispatch(updateChatLastMessage({
 						chatId: String(sidebarChatId),
 						message: displayMessage,
@@ -131,13 +120,24 @@ function ChatLayout() {
 						sender: msg.sender,
 						receiver: msg.receiver,
 						isEncrypted: msg.isEncrypted,
-						lastMessageSenderId: String(msg.senderId)
+						lastMessageSenderId: String(msg.senderId),
+						lastMessageId: String(msg.id),
+						isForwarded: !!msg.isForwarded
 					}));
 				}
       } else if (msg.type === 'chatRequestAccepted') {
         dispatch(updateChatStatus({
           chatRoomId: msg.chatRoomId,
           status: 'ACCEPTED'
+        }));
+      } else if (msg.type === 'messageUpdated' || msg.type === 'messageDeleted') {
+        dispatch(updateChatPreview({
+          messageId: msg.id,
+          senderId: msg.senderId,
+          receiverId: msg.receiverId,
+          sidebarText: msg.sidebarText,
+          isMine: String(msg.senderId) === String(user?.id),
+          isEncrypted: msg.type === 'messageDeleted' ? false : undefined
         }));
       }
     });

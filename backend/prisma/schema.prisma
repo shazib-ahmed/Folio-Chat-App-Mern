@@ -76,6 +76,8 @@ model Message {
   messageType    MessageType @default(TEXT)
   status         MessageStatus @default(UNSEEN)
   isEncrypted    Boolean     @default(false)
+  isEdited       Boolean     @default(false)
+  isForwarded    Boolean     @default(false)
   
   createdAt      DateTime    @default(now())
   updatedAt      DateTime    @updatedAt

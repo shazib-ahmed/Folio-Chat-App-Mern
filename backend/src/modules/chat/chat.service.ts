@@ -31,7 +31,8 @@ export class ChatService {
     clientMsgId?: string,
     providedFileUrl?: string,
     providedFileName?: string,
-    providedFileSize?: string
+    providedFileSize?: string,
+    isForwarded: boolean = false
   ) {
     console.log('DEBUG: sendMessage incoming:', { isEncrypted, providedFileUrl: !!providedFileUrl, providedFileName: !!providedFileName });
     
@@ -59,6 +60,7 @@ export class ChatService {
         messageType: type,
         chatRoomId: chatRoom.id,
         isEncrypted,
+        isForwarded,
       },
       include: {
         sender: true,
@@ -80,7 +82,10 @@ export class ChatService {
       status: message.status.toLowerCase(),
       messageType: message.messageType,
       isEncrypted: message.isEncrypted,
+      isForwarded: message.isForwarded,
+      createdAt: message.createdAt.toISOString(),
       clientMsgId,
+
       sender: {
         id: message.sender.id.toString(),
         name: message.sender.name || message.sender.username,
@@ -216,7 +221,6 @@ export class ChatService {
       cursor: cursor ? { id: Number(cursor) } : undefined,
       where: {
         chatRoomId: chatRoom.id,
-        deletedAt: null
       },
       orderBy: {
         id: 'desc'
@@ -232,18 +236,26 @@ export class ChatService {
     const blockStatus = await this.getBlockStatus(userId, otherUser.id);
 
     return {
-      messages: chronologicalMessages.map(msg => ({
-        id: msg.id.toString(),
-        senderId: msg.senderId.toString(),
-        text: msg.message,
-        fileUrl: msg.fileUrl,
-        fileName: msg.fileName,
-        fileSize: msg.fileSize,
-        timestamp: this.formatTime(msg.createdAt),
-        status: msg.status.toLowerCase(),
-        messageType: msg.messageType,
-        isEncrypted: msg.isEncrypted,
-      })),
+      messages: chronologicalMessages.map(msg => {
+        const isDeleted = !!msg.deletedAt;
+        return {
+          id: msg.id.toString(),
+          senderId: msg.senderId.toString(),
+          text: isDeleted ? "" : msg.message,
+          fileUrl: isDeleted ? "" : msg.fileUrl,
+          fileName: isDeleted ? "" : msg.fileName,
+          fileSize: isDeleted ? "" : msg.fileSize,
+          timestamp: this.formatTime(msg.createdAt),
+          status: msg.status.toLowerCase(),
+          messageType: isDeleted ? 'TEXT' : msg.messageType,
+          isEncrypted: isDeleted ? false : msg.isEncrypted,
+          isEdited: msg.isEdited,
+          isForwarded: msg.isForwarded,
+          isDeleted,
+          createdAt: msg.createdAt.toISOString(),
+        };
+      }),
+
       chatStatus: chatRoom.status,
       requesterId: chatRoom.requesterId ? chatRoom.requesterId.toString() : null,
       nextCursor,
@@ -279,32 +291,36 @@ export class ChatService {
   }
 
   private formatLastMessage(msg: any): string {
+    if (msg.deletedAt) return '🚫 deleted a message';
+    const isForwarded = msg.isForwarded === true || msg.isForwarded === 'true';
+    const prefix = isForwarded ? '↗️ Forwarded: ' : '';
+    console.log(`DEBUG: formatLastMessage msgId=${msg.id}, isForwarded=${msg.isForwarded}, prefix='${prefix}'`);
+    
     if (msg.isEncrypted && msg.message) {
       try {
         const parsed = JSON.parse(msg.message);
-        if (parsed.fileMeta || (parsed.iv && (parsed.r || parsed.s))) {
+        if (parsed.c || parsed.text) {
+          // It's a text message, return a placeholder or letting frontend decrypt
+          return prefix + '🔒 Encrypted message';
+        } else if (parsed.m || parsed.fileMeta || (parsed.iv && (parsed.r || parsed.s))) {
           // It's an E2EE file/attachment
           const typeLabels: any = { 'IMAGE': '📷 Photo', 'VIDEO': '🎥 Video', 'AUDIO': '🎵 Audio', 'FILE': '📄 File' };
-          return typeLabels[msg.messageType] || '📄 Attachment';
-        } else if (parsed.text) {
-          // Wrapped text: { text: "...", fileMeta: "..." }
-          // We can't decrypt it here, so we return it. Frontend will decrypt if it can.
-          return parsed.text;
+          return prefix + (typeLabels[msg.messageType] || '📄 Attachment');
         }
       } catch (e) {
         // Not JSON, return as is
       }
     }
 
-    if (msg.messageType === 'IMAGE') return '📷 Photo';
-    if (msg.messageType === 'VIDEO') return '🎥 Video';
-    if (msg.messageType === 'AUDIO') return '🎵 Audio';
+    if (msg.messageType === 'IMAGE') return prefix + '📷 Photo';
+    if (msg.messageType === 'VIDEO') return prefix + '🎥 Video';
+    if (msg.messageType === 'AUDIO') return prefix + '🎵 Audio';
     if (msg.messageType === 'FILE') {
       const fileName = msg.fileName || '';
-      if (fileName.toLowerCase().endsWith('.pdf')) return '📄 PDF Document';
-      return '📄 File';
+      if (fileName.toLowerCase().endsWith('.pdf')) return prefix + '📄 PDF Document';
+      return prefix + '📄 File';
     }
-    return msg.message || '';
+    return prefix + (msg.message || '');
   }
 
   async getChatList(userId: number) {
@@ -315,8 +331,7 @@ export class ChatService {
           OR: [
             { senderId: userId },
             { receiverId: userId }
-          ],
-          deletedAt: null
+          ]
         },
         orderBy: {
           createdAt: 'desc'
@@ -354,12 +369,13 @@ export class ChatService {
             username: otherUser.username,
             avatar: otherUser.avatar,
             lastMessage: (isMine ? "You: " : "") + displayMessage,
+            lastMessageId: msg.id.toString(),
             lastMessageSenderId: msg.senderId.toString(),
             lastMessageTime: this.formatTime(msg.createdAt),
             lastMessageType: msg.messageType,
             online: otherUser.isOnline,
             unreadCount: unreadCount,
-            isEncrypted: msg.isEncrypted,
+            isEncrypted: msg.deletedAt ? false : msg.isEncrypted,
             lastSeen: otherUser.lastSeen ? this.formatTime(otherUser.lastSeen) : null,
             ...(await this.getBlockStatus(userId, otherUser.id))
           });
@@ -502,4 +518,90 @@ export class ChatService {
     });
     return user?.publicKey || null;
   }
+
+  async updateMessage(userId: number, messageId: number, newContent: string) {
+    try {
+      const message = await this.prisma.message.findUnique({
+        where: { id: messageId },
+      });
+
+      if (!message) throw new Error('Message not found');
+      if (message.senderId !== userId) throw new Error('Unauthorized');
+
+      // Check time constraint (15 seconds)
+      const now = new Date();
+      const diff = (now.getTime() - message.createdAt.getTime()) / 1000;
+      if (diff > 15) {
+        throw new Error('Messages can only be edited within 15 seconds.');
+      }
+
+      const updatedMessage = await this.prisma.message.update({
+        where: { id: messageId },
+        data: { 
+          message: newContent,
+          isEdited: true
+        },
+        include: {
+          sender: true,
+          receiver: true
+        }
+      });
+
+      const socketPayload = {
+        id: updatedMessage.id.toString(),
+        senderId: updatedMessage.senderId.toString(),
+        receiverId: updatedMessage.receiverId.toString(),
+        text: updatedMessage.message,
+        isEdited: true,
+        createdAt: updatedMessage.createdAt.toISOString(),
+        timestamp: this.formatTime(updatedMessage.createdAt),
+        lastMessageId: updatedMessage.id.toString(),
+        isEncrypted: updatedMessage.isEncrypted,
+        sidebarText: this.formatLastMessage(updatedMessage)
+      };
+
+      this.chatGateway.sendMessageToUser(updatedMessage.receiverId, 'messageUpdated', socketPayload);
+      this.chatGateway.sendMessageToUser(updatedMessage.senderId, 'messageUpdated', socketPayload);
+
+      return { success: true, message: updatedMessage };
+    } catch (error) {
+      console.error('Error updating message:', error.message);
+      throw error;
+    }
+  }
+
+  async deleteMessage(userId: number, messageId: number) {
+    try {
+      const message = await this.prisma.message.findUnique({
+        where: { id: messageId }
+      });
+
+      if (!message) throw new Error('Message not found');
+      if (message.senderId !== userId) throw new Error('Unauthorized');
+
+      await this.prisma.message.update({
+        where: { id: messageId },
+        data: { deletedAt: new Date() }
+      });
+
+      const socketPayload = {
+        id: messageId.toString(),
+        senderId: message.senderId.toString(),
+        receiverId: message.receiverId.toString(),
+        isDeleted: true,
+        isEncrypted: false,
+        sidebarText: '🚫 deleted a message'
+      };
+
+      this.chatGateway.sendMessageToUser(message.receiverId, 'messageDeleted', socketPayload);
+      this.chatGateway.sendMessageToUser(message.senderId, 'messageDeleted', socketPayload);
+
+      return { success: true };
+    } catch (error) {
+      console.error('Error deleting message:', error.message);
+      throw error;
+    }
+  }
 }
+
+

@@ -34,7 +34,8 @@ export const sendMessageApi = async (
   clientMsgId?: string,
   fileUrl?: string,
   fileName?: string,
-  fileSize?: string
+  fileSize?: string,
+  isForwarded: boolean = false
 ) => {
   const formData = new FormData();
   formData.append('receiverId', receiverId);
@@ -46,6 +47,7 @@ export const sendMessageApi = async (
   if (fileUrl) formData.append('fileUrl', fileUrl);
   if (fileName) formData.append('fileName', fileName);
   if (fileSize) formData.append('fileSize', fileSize);
+  formData.append('isForwarded', String(isForwarded));
   
   const response = await api.post('/chat/send', formData, {
     headers: { 'Content-Type': 'multipart/form-data' }
@@ -94,3 +96,15 @@ export const getPublicKeyApi = async (username: string): Promise<string | null> 
   const response = await api.get(`/chat/user/${username}/public-key`);
   return response.data;
 };
+
+export const updateMessageApi = async (messageId: string, message: string): Promise<any> => {
+  const response = await api.post(`/chat/update/${messageId}`, { message });
+  return response.data;
+};
+
+export const deleteMessageApi = async (messageId: string): Promise<any> => {
+  const response = await api.post(`/chat/delete/${messageId}`);
+  return response.data;
+};
+
+

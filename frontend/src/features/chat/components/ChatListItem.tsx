@@ -25,43 +25,71 @@ export function ChatListItem({ chat, isActive, onClick }: ChatListItemProps) {
         if (privateKey) {
           try {
             let cipherText = chat.lastMessage;
-            
-            // Check if it's already a placeholder (like "📷 Photo" or "[Image]")
-            if (cipherText.includes('📷') || cipherText.includes('🎥') || cipherText.includes('🎵') || cipherText.includes('📄')) {
-              setDisplayText(cipherText);
+            const isSender = String(chat.lastMessageSenderId) === String(me?.id);
+            const forwardPrefix = chat.isForwarded ? '↗️ Forwarded: ' : '';
+
+            // Check if it's already a placeholder (like "📷 Photo" or "🚫 Deleted")
+            if (cipherText.includes('📷') || cipherText.includes('🎥') || cipherText.includes('🎵') || cipherText.includes('📄') || cipherText.includes('🚫')) {
+              let final = cipherText;
+              if (chat.isForwarded && !final.includes('Forwarded')) {
+                final = '↗️ Forwarded: ' + final;
+              }
+              if (isSender && !final.startsWith('You:')) {
+                final = `You: ${final}`;
+              }
+              setDisplayText(final);
               return;
             }
 
             // Check if it's JSON
             try {
               const parsed = JSON.parse(cipherText);
-              if (parsed.fileMeta || (parsed.iv && (parsed.r || parsed.s))) {
+              
+              // 1. If it has 'c' or 'text', it's a decryptable text message
+              if (parsed.c || parsed.text) {
+                // Do nothing here, it will fall through to decryptMessage(cipherText, ...)
+                // and we ensure it doesn't enter the 'else if' below
+              } 
+              // 2. If it has 'm' or 'fileMeta', it's a file attachment
+              else if (parsed.m || parsed.fileMeta || (parsed.iv && (parsed.r || parsed.s))) {
                 const typeLabels: any = { 'IMAGE': '📷 Photo', 'VIDEO': '🎥 Video', 'AUDIO': '🎵 Audio', 'FILE': '📄 File' };
                 const label = typeLabels[chat.lastMessageType || ''] || '📄 Attachment'; 
-                setDisplayText((String(chat.lastMessageSenderId) === String(me?.id) ? "You: " : "") + label);
+                setDisplayText((isSender ? "You: " : "") + forwardPrefix + label);
                 return;
-              } else if (parsed.text) {
-                cipherText = parsed.text;
               }
             } catch (e) {
-              // Not JSON, continue as standard encrypted text
+              // Not JSON
             }
 
-            const isSender = String(chat.lastMessageSenderId) === String(me?.id);
             const decrypted = await decryptMessage(cipherText, privateKey, isSender);
-            setDisplayText((isSender ? "You: " : "") + decrypted);
+            setDisplayText((isSender ? "You: " : "") + forwardPrefix + decrypted);
           } catch (err) {
             console.error('Sidebar decryption failed:', err);
-            // If it fails, it's likely already a display string or a corrupted cipher
-            setDisplayText(chat.lastMessage);
+            const isSender = String(chat.lastMessageSenderId) === String(me?.id);
+            const forwardPrefix = chat.isForwarded ? '↗️ Forwarded: ' : '';
+            setDisplayText((isSender ? "You: " : "") + forwardPrefix + chat.lastMessage);
           }
         }
       } else {
-        setDisplayText(chat.lastMessage);
+        const isSender = String(chat.lastMessageSenderId) === String(me?.id);
+        const forwardPrefix = chat.isForwarded ? '↗️ Forwarded: ' : '';
+        let msg = chat.lastMessage || "";
+        
+        // Custom handling for deleted messages in sidebar
+        if (msg.includes('🚫') || msg.toLowerCase().includes('deleted a message') || msg.toLowerCase().includes('message deleted')) {
+          const text = isSender ? "You deleted a message" : `${chat.name} deleted a message`;
+          setDisplayText(text);
+          return;
+        }
+
+        if (chat.isForwarded && msg && !msg.includes('Forwarded')) {
+          msg = forwardPrefix + msg;
+        }
+        setDisplayText(isSender && msg && !msg.startsWith('You:') ? `You: ${msg}` : msg);
       }
     };
     handleDecryption();
-  }, [chat.lastMessage, chat.isEncrypted, chat.lastMessageSenderId, chat.lastMessageType, me?.id]);
+  }, [chat.lastMessage, chat.isEncrypted, chat.isForwarded, chat.lastMessageSenderId, chat.lastMessageType, chat.name, me?.id]);
 
   return (
     <div

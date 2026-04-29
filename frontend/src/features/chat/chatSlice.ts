@@ -49,18 +49,22 @@ const chatSlice = createSlice({
       receiver?: any;
       isEncrypted?: boolean;
       lastMessageSenderId?: string;
+      lastMessageId?: string;
+      isForwarded?: boolean;
     }>) => {
-      const { chatId, message, time, isMine, sender, receiver, isEncrypted, lastMessageSenderId } = action.payload;
+      const { chatId, message, time, isMine, sender, receiver, isEncrypted, lastMessageSenderId, lastMessageId, isForwarded } = action.payload;
       const chatIndex = state.chats.findIndex(c => c.id === chatId);
       
       if (chatIndex !== -1) {
         const chat = { ...state.chats[chatIndex] };
         // For encrypted messages, we store the raw message. 
         // For plain text, we prepend "You: " if it's mine.
-        chat.lastMessage = (isMine && !isEncrypted) ? `You: ${message}` : message;
+        chat.lastMessage = message;
         chat.lastMessageTime = time;
         chat.isEncrypted = isEncrypted;
         chat.lastMessageSenderId = lastMessageSenderId;
+        chat.lastMessageId = lastMessageId;
+        chat.isForwarded = isForwarded;
         
         if (!isMine) {
           chat.unreadCount = (chat.unreadCount || 0) + 1;
@@ -80,7 +84,9 @@ const chatSlice = createSlice({
           lastMessageTime: time,
           unreadCount: 1,
           isEncrypted: isEncrypted,
-          lastMessageSenderId: lastMessageSenderId
+          isForwarded: isForwarded,
+          lastMessageSenderId: lastMessageSenderId,
+          lastMessageId: lastMessageId
         };
         state.chats = [newChat, ...state.chats];
       } else if (isMine && receiver) {
@@ -91,11 +97,13 @@ const chatSlice = createSlice({
           username: receiver.username,
           avatar: receiver.avatar,
           online: receiver.online,
-          lastMessage: isEncrypted ? message : `You: ${message}`,
+          lastMessage: message,
           lastMessageTime: time,
           unreadCount: 0,
           isEncrypted: isEncrypted,
-          lastMessageSenderId: lastMessageSenderId
+          isForwarded: isForwarded,
+          lastMessageSenderId: lastMessageSenderId,
+          lastMessageId: lastMessageId
         };
         state.chats = [newChat, ...state.chats];
       }
@@ -125,6 +133,29 @@ const chatSlice = createSlice({
       state.chats = state.chats.map(chat => {
         return chat; 
       });
+    },
+    updateChatPreview: (state, action: PayloadAction<{ 
+      messageId: string; 
+      senderId: string; 
+      receiverId: string; 
+      sidebarText: string;
+      isMine: boolean;
+      isEncrypted?: boolean;
+    }>) => {
+      const { messageId, senderId, receiverId, sidebarText, isEncrypted } = action.payload;
+      
+      const chat = state.chats.find(c => {
+        const idMatch = String(c.id) === String(senderId) || String(c.id) === String(receiverId);
+        const msgMatch = String(c.lastMessageId) === String(messageId);
+        return idMatch && msgMatch;
+      });
+
+      if (chat) {
+        chat.lastMessage = sidebarText;
+        if (isEncrypted !== undefined) {
+          chat.isEncrypted = isEncrypted;
+        }
+      }
     }
   },
   extraReducers: (builder) => {
@@ -144,5 +175,5 @@ const chatSlice = createSlice({
   },
 });
 
-export const { setChats, selectChat, updateChatLastMessage, clearUnreadCount, setTypingStatus, setUserStatus, updateChatStatus } = chatSlice.actions;
+export const { setChats, selectChat, updateChatLastMessage, clearUnreadCount, setTypingStatus, setUserStatus, updateChatStatus, updateChatPreview } = chatSlice.actions;
 export default chatSlice.reducer;

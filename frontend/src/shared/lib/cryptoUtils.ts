@@ -182,8 +182,8 @@ export const decryptMessage = async (jsonCipher: string, privateKey: CryptoKey, 
     
     if (!encryptedAesKeyB64) return "[Decryption key missing]";
 
-    const encryptedContent = base64ToUint8Array(data.c || "");
-    if (!data.c && data.m) {
+    const encryptedContent = base64ToUint8Array(data.c || data.text || "");
+    if (!data.c && !data.text && data.m) {
       // It's a file metadata only message, nothing to decrypt as "text"
       return "";
     }
@@ -346,4 +346,45 @@ export const decryptFile = async (
     fileName,
     fileSize
   };
+};
+/**
+ * Re-wraps file metadata for a new recipient when forwarding
+ */
+export const rewrapFileMeta = async (
+  metadataStr: string,
+  privateKey: CryptoKey,
+  isOriginalSender: boolean,
+  newRecipientPubKeyPem: string,
+  newMyPubKeyPem: string
+): Promise<string> => {
+  try {
+    const metadata = JSON.parse(metadataStr);
+    const encryptedAesKeyB64 = isOriginalSender ? metadata.s : metadata.r;
+    
+    if (!encryptedAesKeyB64) throw new Error("Encryption key missing in metadata");
+
+    // 1. Decrypt original AES key
+    const decryptedAesKeyRaw = await window.crypto.subtle.decrypt(
+      { name: "RSA-OAEP" },
+      privateKey,
+      b64Decode(encryptedAesKeyB64) as any
+    );
+
+    // 2. Import new public keys
+    const recipientPubKey = await importPublicKey(newRecipientPubKeyPem);
+    const myPubKey = await importPublicKey(newMyPubKeyPem);
+
+    // 3. Re-encrypt for new parties
+    const newR = await window.crypto.subtle.encrypt({ name: "RSA-OAEP" }, recipientPubKey, decryptedAesKeyRaw);
+    const newS = await window.crypto.subtle.encrypt({ name: "RSA-OAEP" }, myPubKey, decryptedAesKeyRaw);
+
+    return JSON.stringify({
+      ...metadata,
+      r: b64Encode(new Uint8Array(newR)),
+      s: b64Encode(new Uint8Array(newS))
+    });
+  } catch (err) {
+    console.error("Re-wrapping file metadata failed:", err);
+    return metadataStr; // Fallback to original
+  }
 };

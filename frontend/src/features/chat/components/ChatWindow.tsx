@@ -5,19 +5,19 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/shared/ui/avatar";
 import { Input } from "@/shared/ui/input";
 import { Button } from "@/shared/ui/button";
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faBan, faSearch, faFaceSmile, faPaperclip, faMicrophone, faPaperPlane, faArrowLeft, faPhone, faVideo, faXmark, faChevronDown, faTrash, faUnlock } from '@fortawesome/free-solid-svg-icons';
+import { faBan, faSearch, faFaceSmile, faPaperclip, faMicrophone, faPaperPlane, faArrowLeft, faPhone, faVideo, faXmark, faChevronDown, faTrash, faUnlock, faPen, faShare, faSpinner } from '@fortawesome/free-solid-svg-icons';
 import { MessageBubble } from "./MessageBubble";
 import { Chat, Message } from "../types";
 import { cn } from "@/shared/lib/utils";
 
-import { getMessagesApi, sendMessageApi, markSeenApi, blockUserApi, unblockUserApi, acceptRequestApi, searchMessagesApi, getPublicKeyApi, uploadFileApi } from '../chatService';
-import { encryptForBoth, decryptMessage, getLocalPrivateKey, encryptFileForBoth, isEncryptedPayload } from '@/shared/lib/cryptoUtils';
+import { getMessagesApi, sendMessageApi, markSeenApi, blockUserApi, unblockUserApi, acceptRequestApi, searchMessagesApi, getPublicKeyApi, uploadFileApi, updateMessageApi, deleteMessageApi, getChatListApi } from '../chatService';
+import { encryptForBoth, decryptMessage, getLocalPrivateKey, encryptFileForBoth, isEncryptedPayload, rewrapFileMeta } from '@/shared/lib/cryptoUtils';
 
 import { subscribeToMessages, getSocket } from '@/shared/lib/socket';
 import { useSelector, useDispatch } from 'react-redux';
 import { RootState, AppDispatch } from '@/app/store';
 import { Skeleton } from "@/shared/ui/skeleton";
-import { clearUnreadCount } from '../chatSlice';
+import { clearUnreadCount, updateChatPreview } from '../chatSlice';
 
 import {
   Dialog,
@@ -37,15 +37,24 @@ interface ChatWindowProps {
 export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWindowProps) {
   const { user: me } = useSelector((state: RootState) => state.auth);
   const navigate = useNavigate();
+  const [editingMessage, setEditingMessage] = useState<Message | null>(null);
+  const [forwardingMessage, setForwardingMessage] = useState<Message | null>(null);
+  const [isForwardModalOpen, setIsForwardModalOpen] = useState(false);
+  const [fullChatList, setFullChatList] = useState<any[]>([]);
+  const [forwardSearchQuery, setForwardSearchQuery] = useState("");
+  const [forwardSearchResults, setForwardSearchResults] = useState<any[]>([]);
+  const [isSearchingForward, setIsSearchingForward] = useState(false);
+  const [isForwarding, setIsForwarding] = useState(false);
   const [inputText, setInputText] = useState("");
   const [localMessages, setLocalMessages] = useState<Message[]>([]);
   const [isSearching, setIsSearching] = useState(false);
-  const [searchQuery, setSearchQuery] = useState("");
+  const [deletingMessageId, setDeletingMessageId] = useState<string | null>(null);
   const [isEmojiPickerOpen, setIsEmojiPickerOpen] = useState(false);
   const [isBlockModalOpen, setIsBlockModalOpen] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [filePreview, setFilePreview] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
   const [hasMore, setHasMore] = useState(false);
   const [isFetchingMore, setIsFetchingMore] = useState(false);
@@ -118,9 +127,9 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
                 fileMeta = parsed.fileMeta;
               } else if (parsed.iv) {
                 // If it has iv/r/s but no fileMeta, it's either text or just fileMeta
-                if (parsed.c) {
+                if (parsed.c || parsed.text) {
                   decryptedText = await decryptMessage(msg.text, privateKey, isSender);
-                } else {
+                } else if (parsed.m) {
                   fileMeta = msg.text;
                   decryptedText = "";
                 }
@@ -257,6 +266,52 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
         return;
       }
 
+      if (msg.type === 'messageUpdated') {
+        const privateKey = await getLocalPrivateKey();
+        let decryptedText = msg.text;
+        
+        if (msg.isEncrypted && privateKey) {
+          const isSender = String(msg.senderId) === String(me?.id);
+          try {
+             decryptedText = await decryptMessage(msg.text, privateKey, isSender);
+          } catch (e) {
+            console.error("Socket: Failed to decrypt updated message:", e);
+          }
+        }
+
+        setLocalMessages(prev => prev.map(m => 
+          String(m.id) === String(msg.id) 
+            ? { ...m, text: decryptedText, isEdited: true } 
+            : m
+        ));
+
+        dispatch(updateChatPreview({
+          messageId: msg.id,
+          senderId: msg.senderId,
+          receiverId: msg.receiverId,
+          sidebarText: msg.sidebarText,
+          isMine: String(msg.senderId) === String(me?.id)
+        }));
+        return;
+      }
+
+      if (msg.type === 'messageDeleted') {
+        setLocalMessages(prev => prev.map(m => 
+          String(m.id) === String(msg.id) 
+            ? { ...m, isDeleted: true, text: "", fileUrl: "", fileName: "", fileSize: "", messageType: 'TEXT' } 
+            : m
+        ));
+        dispatch(updateChatPreview({
+          messageId: msg.id,
+          senderId: msg.senderId,
+          receiverId: msg.receiverId,
+          sidebarText: msg.sidebarText,
+          isMine: String(msg.senderId) === String(me?.id),
+          isEncrypted: false
+        }));
+        return;
+      }
+
       if (msg.type === 'chatRequestAccepted') {
         const activeChat = currentChatRef.current;
         console.log('Chat request accepted event received:', msg, 'Active chat:', activeChat?.id);
@@ -290,7 +345,10 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
       }
 
       // Handle new messages with decryption
-      if (chat && (String(msg.senderId) === String(chat.id) || String(msg.receiverId) === String(chat.id) || String(msg.senderId) === String(me?.id) || String(msg.receiverId) === String(me?.id))) {
+      if (chat && (
+        (String(msg.senderId) === String(chat.id) && String(msg.receiverId) === String(me?.id)) ||
+        (String(msg.senderId) === String(me?.id) && String(msg.receiverId) === String(chat.id))
+      )) {
         
         const privateKey = await getLocalPrivateKey();
         let decryptedText = msg.text;
@@ -457,6 +515,32 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
     if (isBlocked) {
       alert(blockedByMe ? "You have blocked this contact. Unblock to send messages." : "You are blocked. You cannot send messages.");
       return;
+    }
+
+    if (editingMessage) {
+      try {
+        const messageToUpdate = editingMessage;
+        const newText = inputText;
+        setEditingMessage(null);
+        setInputText("");
+
+        let contentToSend = newText;
+        if (messageToUpdate.isEncrypted) {
+          const [recipientPubKey, myPubKey] = await Promise.all([
+            getPublicKeyApi(chat.username),
+            getPublicKeyApi(me.username)
+          ]);
+          if (recipientPubKey && myPubKey) {
+            contentToSend = await encryptForBoth(newText, recipientPubKey, myPubKey);
+          }
+        }
+
+        await updateMessageApi(messageToUpdate.id, contentToSend);
+        return;
+      } catch (err: any) {
+        console.error('Failed to update message:', err);
+        return;
+      }
     }
 
     // If this is the first message, set me as requester to avoid seeing the banner
@@ -635,6 +719,106 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
+
+  // Fetch chat list for forwarding
+  useEffect(() => {
+    if (isForwardModalOpen) {
+      setIsSearchingForward(true);
+      getChatListApi()
+        .then((list: Chat[]) => {
+          const filtered = list.filter(c => String(c.id) !== String(chat?.id));
+          setFullChatList(filtered);
+          setForwardSearchResults(filtered);
+        })
+        .catch((err: any) => console.error('Failed to fetch chat list for forwarding:', err))
+        .finally(() => setIsSearchingForward(false));
+    } else {
+      setFullChatList([]);
+      setForwardSearchResults([]);
+      setForwardSearchQuery("");
+    }
+  }, [isForwardModalOpen, chat?.id]);
+
+  // Filter local chat list
+  useEffect(() => {
+    if (!forwardSearchQuery.trim()) {
+      setForwardSearchResults(fullChatList);
+      return;
+    }
+
+    const filtered = fullChatList.filter(chat => 
+      chat.name?.toLowerCase().includes(forwardSearchQuery.toLowerCase()) || 
+      chat.username?.toLowerCase().includes(forwardSearchQuery.toLowerCase())
+    );
+    setForwardSearchResults(filtered);
+  }, [forwardSearchQuery, fullChatList]);
+
+  const handleForward = async (targetUser: any) => {
+    if (!forwardingMessage) return;
+    setIsForwarding(true);
+    try {
+      const msg = forwardingMessage;
+      let content = msg.text || "";
+      let fileUrl = msg.fileUrl;
+      let fileName = msg.fileName;
+      let fileSize = msg.fileSize;
+      let isEncrypted = !!msg.isEncrypted;
+
+      if (isEncrypted) {
+        const privateKey = await getLocalPrivateKey();
+        const [recipientPubKeyPem, myPubKeyPem] = await Promise.all([
+          getPublicKeyApi(targetUser.username),
+          getPublicKeyApi(me!.username)
+        ]);
+
+        if (recipientPubKeyPem && myPubKeyPem && privateKey) {
+          const isOriginalSender = String(msg.senderId) === String(me?.id);
+
+          if (msg.messageType === 'TEXT') {
+            if (content) content = await encryptForBoth(content, recipientPubKeyPem, myPubKeyPem);
+          } else if (msg.fileMeta) {
+            // Re-wrap file metadata (re-encrypts the AES key)
+            const newFileMeta = await rewrapFileMeta(msg.fileMeta, privateKey, isOriginalSender, recipientPubKeyPem, myPubKeyPem);
+            // Re-encrypt caption if present
+            const reEncryptedText = content ? await encryptForBoth(content, recipientPubKeyPem, myPubKeyPem) : "";
+            content = JSON.stringify({ 
+               fileMeta: newFileMeta,
+               text: reEncryptedText 
+            });
+          }
+
+          // Re-encrypt preview fields for the new recipient
+          if (fileUrl) fileUrl = await encryptForBoth(fileUrl, recipientPubKeyPem, myPubKeyPem);
+          if (fileName) fileName = await encryptForBoth(fileName, recipientPubKeyPem, myPubKeyPem);
+          if (fileSize) fileSize = await encryptForBoth(fileSize, recipientPubKeyPem, myPubKeyPem);
+        }
+      }
+
+      await sendMessageApi(
+        targetUser.id.toString(),
+        content,
+        msg.messageType as any,
+        undefined,
+        isEncrypted,
+        undefined,
+        fileUrl,
+        fileName,
+        fileSize,
+        true // isForwarded
+      );
+
+      setIsForwardModalOpen(false);
+      setForwardingMessage(null);
+      setForwardSearchQuery("");
+      
+      // Optionally navigate to the chat or just show success
+      // navigate(`/chat/${targetUser.username}`);
+    } catch (err) {
+      console.error('Failed to forward message:', err);
+    } finally {
+      setIsForwarding(false);
+    }
+  };
 
   const handleAcceptRequest = async () => {
     if (!chat || !me) return;
@@ -1010,6 +1194,76 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
         </DialogContent>
       </Dialog>
 
+      <Dialog open={isForwardModalOpen} onOpenChange={setIsForwardModalOpen}>
+        <DialogContent className="max-w-[400px] p-0 overflow-hidden bg-background/95 backdrop-blur-xl border-border/40 shadow-2xl">
+          <DialogHeader className="p-4 pb-2">
+            <DialogTitle className="flex items-center gap-2">
+              <FontAwesomeIcon icon={faShare} className="text-primary text-sm" />
+              Forward Message
+            </DialogTitle>
+          </DialogHeader>
+          
+          <div className="px-4 pb-4 space-y-4">
+            <div className="relative">
+              <FontAwesomeIcon icon={faSearch} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-xs" />
+              <Input 
+                placeholder="Search people to forward..." 
+                value={forwardSearchQuery}
+                onChange={(e) => setForwardSearchQuery(e.target.value)}
+                className="pl-9 bg-black/5 border-none focus-visible:ring-1 focus-visible:ring-primary/20 h-10"
+              />
+            </div>
+
+            <div className="max-h-[300px] overflow-y-auto custom-scrollbar pr-1">
+              {isSearchingForward ? (
+                <div className="flex flex-col gap-2 p-2">
+                  <Skeleton className="h-12 w-full rounded-xl" />
+                  <Skeleton className="h-12 w-full rounded-xl" />
+                  <Skeleton className="h-12 w-full rounded-xl" />
+                </div>
+              ) : forwardSearchResults.length > 0 ? (
+                <div className="flex flex-col gap-1">
+                  {forwardSearchResults.map(user => (
+                    <div 
+                      key={user.id}
+                      onClick={() => !isForwarding && handleForward(user)}
+                      className={cn(
+                        "flex items-center gap-3 p-2 rounded-xl hover:bg-primary/10 cursor-pointer transition-all group",
+                        isForwarding && "opacity-50 cursor-not-allowed"
+                      )}
+                    >
+                      <Avatar className="h-10 w-10 border border-border/50 group-hover:border-primary/30 transition-colors">
+                        <AvatarImage src={user.avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.username}`} />
+                        <AvatarFallback>{user.username[0].toUpperCase()}</AvatarFallback>
+                      </Avatar>
+                      <div className="flex-1 min-w-0 text-left">
+                        <p className="text-sm font-semibold truncate group-hover:text-primary transition-colors">{user.name || user.username}</p>
+                        <p className="text-[11px] text-muted-foreground truncate">@{user.username}</p>
+                      </div>
+                      <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center text-primary opacity-0 group-hover:opacity-100 transition-all scale-75 group-hover:scale-100">
+                         {isForwarding ? (
+                           <FontAwesomeIcon icon={faSpinner} className="text-xs animate-spin" />
+                         ) : (
+                           <FontAwesomeIcon icon={faPaperPlane} className="text-xs" />
+                         )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : forwardSearchQuery ? (
+                <div className="text-center py-8 text-muted-foreground">
+                   <p className="text-sm">No users found</p>
+                </div>
+              ) : (
+                <div className="text-center py-8 text-muted-foreground">
+                   <p className="text-xs">Search for contacts to forward this message</p>
+                </div>
+              )}
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       {/* Messages Area */}
       <div className="flex-1 relative overflow-hidden flex flex-col">
         <div 
@@ -1045,6 +1299,26 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
                   <MessageBubble 
                     message={msg} 
                     isMe={String(msg.senderId) === String(me?.id)}
+                    otherName={chat?.username}
+                    onEdit={(m) => {
+                      setEditingMessage(m);
+                      setInputText(m.text || "");
+                    }}
+                    onDelete={async (id) => {
+                      setDeletingMessageId(id);
+                      try {
+                        await deleteMessageApi(id);
+                      } catch (err) {
+                        console.error('Failed to delete message:', err);
+                      } finally {
+                        setDeletingMessageId(null);
+                      }
+                    }}
+                    isDeleting={deletingMessageId === msg.id}
+                    onForward={(m) => {
+                      setForwardingMessage(m);
+                      setIsForwardModalOpen(true);
+                    }}
                   />
                 </div>
               ))}
@@ -1194,6 +1468,23 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
                   </div>
                 ) : (
                   <>
+                    {editingMessage && (
+                      <div className="absolute bottom-full left-0 right-0 bg-background/80 backdrop-blur-md border-t px-4 py-2 flex items-center justify-between animate-in slide-in-from-bottom-2 duration-300 z-10">
+                        <div className="flex items-center gap-2 overflow-hidden">
+                          <FontAwesomeIcon icon={faPen} className="text-primary text-xs shrink-0" />
+                          <div className="min-w-0">
+                            <p className="text-[10px] font-bold text-primary uppercase tracking-wider">Editing Message</p>
+                            <p className="text-xs truncate text-muted-foreground">{editingMessage.text}</p>
+                          </div>
+                        </div>
+                        <Button variant="ghost" size="icon" className="h-6 w-6 rounded-full" onClick={() => {
+                          setEditingMessage(null);
+                          setInputText("");
+                        }}>
+                          <FontAwesomeIcon icon={faXmark} className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    )}
                     <div className="flex items-center">
                       <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-primary transition-colors" onClick={() => handleFileClick('file')}>
                         <FontAwesomeIcon icon={faPaperclip} className="h-5 w-5" />

@@ -34,7 +34,17 @@ const setupGlobalListeners = () => {
 	socket.on('chatRequestAccepted', (data: any) => {
 		subscribers.forEach(cb => cb(null, { ...data, type: 'chatRequestAccepted' }));
 	});
+
+	socket.on('messageUpdated', (data: any) => {
+		subscribers.forEach(cb => cb(null, { ...data, type: 'messageUpdated' }));
+	});
+
+	socket.on('messageDeleted', (data: any) => {
+		subscribers.forEach(cb => cb(null, { ...data, type: 'messageDeleted' }));
+	});
 };
+
+
 
 
 export const initiateSocketConnection = (userId: string | number) => {

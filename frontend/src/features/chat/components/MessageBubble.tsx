@@ -2,8 +2,14 @@ import React, { useState, useRef } from 'react';
 import { cn } from "@/shared/lib/utils";
 import { Message } from "../types";
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faCheckDouble, faFileLines, faDownload, faClock, faPlay, faPause, faMicrophone, faXmark } from '@fortawesome/free-solid-svg-icons';
+import { faCheckDouble, faFileLines, faDownload, faClock, faPlay, faPause, faMicrophone, faXmark, faPen, faEllipsisVertical, faTrash, faShare } from '@fortawesome/free-solid-svg-icons';
 import { Button } from '@/shared/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/shared/ui/dropdown-menu";
 import { decryptFile, getLocalPrivateKey, decryptMessage, isEncryptedPayload } from '@/shared/lib/cryptoUtils';
 
 import { Skeleton } from '@/shared/ui/skeleton';
@@ -11,6 +17,11 @@ import { Skeleton } from '@/shared/ui/skeleton';
 interface MessageBubbleProps {
   message: Message;
   isMe?: boolean;
+  onEdit?: (message: Message) => void;
+  onDelete?: (messageId: string) => void;
+  onForward?: (message: Message) => void;
+  otherName?: string;
+  isDeleting?: boolean;
 }
 
 const VoiceMessage = React.memo(({ url, isMe }: { url: string; isMe?: boolean }) => {
@@ -97,7 +108,7 @@ const VoiceMessage = React.memo(({ url, isMe }: { url: string; isMe?: boolean })
 // Helpers to hide raw encrypted JSON strings from UI
 const sanitizeValue = (val?: string) => isEncryptedPayload(val) ? null : val;
 
-export const MessageBubble = React.memo(({ message, isMe }: MessageBubbleProps) => {
+export const MessageBubble = React.memo(({ message, isMe, onEdit, onDelete, onForward, otherName, isDeleting }: MessageBubbleProps) => {
   const [isImageModalOpen, setIsImageModalOpen] = useState(false);
   const [decryptedUrl, setDecryptedUrl] = useState<string | null>(null);
   const [isDecrypting, setIsDecrypting] = useState(false);
@@ -122,26 +133,49 @@ export const MessageBubble = React.memo(({ message, isMe }: MessageBubbleProps) 
     const handleDecrypt = async () => {
       if (message.isEncrypted) {
         setIsDecrypting(true);
+        console.log(`DEBUG: Decrypting message ${message.id}, type=${message.messageType}, isMe=${isMe}, hasFileMeta=${!!message.fileMeta}`);
         try {
           const privateKey = await getLocalPrivateKey();
           if (!privateKey || !isMounted) return;
 
           const isSender = isMe || false;
+          let cipherText = message.text || "";
+          let fileMeta = message.fileMeta;
+
+          // 0. Handle wrapped JSON (often for files with captions or re-wrapped forwarded files)
+          if (cipherText.startsWith('{')) {
+            try {
+              const parsed = JSON.parse(cipherText);
+              if (parsed.fileMeta) {
+                fileMeta = parsed.fileMeta;
+                cipherText = parsed.text || "";
+              }
+            } catch (e) {
+              // Not wrapped JSON
+            }
+          }
 
           // 1. Decrypt text if it's an encrypted payload
-          if (message.text && isEncryptedPayload(message.text)) {
-            const decrypted = await decryptMessage(message.text, privateKey, isSender);
+          if (cipherText && isEncryptedPayload(cipherText)) {
+            console.log("DEBUG: Decrypting text...");
+            const decrypted = await decryptMessage(cipherText, privateKey, isSender);
+            console.log("DEBUG: Decrypted text:", decrypted);
             if (isMounted) setDecryptedText(decrypted);
+          } else if (cipherText && isMounted) {
+            setDecryptedText(cipherText);
           }
 
           // 2. Decrypt file if exists
-          if (message.fileUrl && message.fileMeta && !message.fileUrl.startsWith('blob:')) {
+          if ((message.fileUrl || fileMeta) && !message.fileUrl?.startsWith('blob:')) {
             let realFileUrl = message.fileUrl;
             let realFileName = message.fileName || "";
 
+            console.log("DEBUG: File found, url encrypted?", isEncryptedPayload(message.fileUrl));
+
             // Decrypt fileUrl if it's an encrypted payload
             if (isEncryptedPayload(message.fileUrl)) {
-              realFileUrl = await decryptMessage(message.fileUrl, privateKey, isSender);
+              realFileUrl = await decryptMessage(message.fileUrl || "", privateKey, isSender);
+              console.log("DEBUG: Decrypted fileUrl:", realFileUrl);
             }
 
             // Decrypt fileName if it's an encrypted payload
@@ -149,10 +183,13 @@ export const MessageBubble = React.memo(({ message, isMe }: MessageBubbleProps) 
               realFileName = await decryptMessage(message.fileName, privateKey, isSender);
             }
 
-            if (realFileUrl && !realFileUrl.startsWith('[Unable') && isMounted) {
+            if (realFileUrl && !realFileUrl.startsWith('[Unable') && fileMeta && isMounted) {
+              console.log("DEBUG: Fetching blob from", realFileUrl);
               const response = await fetch(realFileUrl);
               const encryptedBlob = await response.blob();
-              const decrypted = await decryptFile(encryptedBlob, message.fileMeta, privateKey, isSender);
+              console.log("DEBUG: Blob fetched, size:", encryptedBlob.size);
+              const decrypted = await decryptFile(encryptedBlob, fileMeta, privateKey, isSender);
+              console.log("DEBUG: Blob decrypted, filename:", decrypted.fileName);
               
               if (isMounted) {
                 const url = window.URL.createObjectURL(decrypted.decryptedBlob);
@@ -166,7 +203,7 @@ export const MessageBubble = React.memo(({ message, isMe }: MessageBubbleProps) 
             }
           }
         } catch (err) {
-          console.error("Decryption failed:", err);
+          console.error("DEBUG: Decryption error:", err);
         } finally {
           if (isMounted) setIsDecrypting(false);
         }
@@ -174,14 +211,13 @@ export const MessageBubble = React.memo(({ message, isMe }: MessageBubbleProps) 
     };
 
     handleDecrypt();
-
     return () => {
       isMounted = false;
       if (currentBlobUrl) {
         window.URL.revokeObjectURL(currentBlobUrl);
       }
     };
-  }, [message.fileUrl, message.fileMeta, message.text, message.fileName, message.fileSize, message.isEncrypted, isMe]);
+  }, [message.id, message.fileUrl, message.fileMeta, message.text, message.fileName, message.fileSize, message.isEncrypted, message.messageType, isMe]);
 
 
   const handleDownload = async (e: React.MouseEvent, url: string, fileName: string) => {
@@ -219,16 +255,37 @@ export const MessageBubble = React.memo(({ message, isMe }: MessageBubbleProps) 
 
   return (
     <div className={cn(
-      "flex w-full mb-2",
-      isMe ? "justify-end" : "justify-start"
+      "flex w-full mb-2 group items-center gap-1",
+      isMe ? "flex-row-reverse" : "flex-row"
     )}>
       <div className={cn(
         "max-w-[85%] px-3 py-2 rounded-lg text-sm relative shadow-sm",
-        isMe 
-          ? "bg-[hsl(var(--bubble-me))] text-primary-foreground rounded-tr-none ml-6" 
-          : "bg-[hsl(var(--bubble-other))] text-foreground rounded-tl-none mr-6 border border-border/40"
+        isDeleting && "opacity-70 grayscale",
+        message.isDeleted 
+          ? (isMe ? "bg-muted/30 text-muted-foreground italic border border-muted" : "bg-muted/30 text-muted-foreground italic border border-muted")
+          : (isMe 
+              ? "bg-[hsl(var(--bubble-me))] text-primary-foreground rounded-tr-none" 
+              : "bg-[hsl(var(--bubble-other))] text-foreground rounded-tl-none border border-border/40")
       )}>
-        {/* Triangle Tail */}
+        {/* Deleted Message Placeholder */}
+        {message.isDeleted ? (
+          <div className="flex items-center gap-2 py-1 min-w-[200px]">
+            <FontAwesomeIcon icon={faTrash} className="h-3 w-3 opacity-40" />
+            <span className="text-[11px]">
+              {isMe ? "You deleted a message" : `${otherName || 'User'} deleted a message`}
+            </span>
+            {isDeleting && (
+              <div className="w-3 h-3 border-2 border-primary/30 border-t-primary rounded-full animate-spin ml-auto" />
+            )}
+          </div>
+        ) : (
+          <>
+            {isDeleting && (
+              <div className="absolute inset-0 bg-background/40 backdrop-blur-[1px] z-[60] flex items-center justify-center rounded-lg">
+                <div className="w-5 h-5 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
+              </div>
+            )}
+            {/* Triangle Tail */}
         <div className={cn(
           "absolute top-0 w-3 h-3",
           isMe 
@@ -239,6 +296,14 @@ export const MessageBubble = React.memo(({ message, isMe }: MessageBubbleProps) 
               <path d={isMe ? "M0 0 L8 0 L0 13 Z" : "M8 0 L0 0 L8 13 Z"} />
            </svg>
         </div>
+
+        {/* Forwarded Label */}
+        {message.isForwarded && (
+          <div className="flex items-center gap-1.5 mb-1.5 opacity-60">
+            <FontAwesomeIcon icon={faShare} className="text-[10px]" />
+            <span className="text-[10px] italic font-medium">Forwarded</span>
+          </div>
+        )}
 
         {/* Media Attachments */}
         {message.messageType === 'IMAGE' && (
@@ -350,6 +415,7 @@ export const MessageBubble = React.memo(({ message, isMe }: MessageBubbleProps) 
           <p className="leading-relaxed break-words whitespace-pre-wrap">{activeText}</p>
         )}
         <div className="flex items-center justify-end gap-1.5 mt-1 select-none">
+          {message.isEdited && <span className="text-[9px] opacity-40 font-medium italic">Edited</span>}
           <span className="text-[10px] opacity-60 font-medium">
             {message.timestamp}
           </span>
@@ -365,7 +431,46 @@ export const MessageBubble = React.memo(({ message, isMe }: MessageBubbleProps) 
             </div>
           )}
         </div>
+      </>
+    )}
       </div>
+
+      {!message.isDeleted && onEdit && (
+        <div className="flex flex-col justify-center px-1 opacity-0 group-hover:opacity-100 transition-opacity self-center">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button 
+                variant="ghost" 
+                size="icon" 
+                className="h-8 w-8 rounded-full text-muted-foreground hover:text-primary hover:bg-primary/10"
+              >
+                <FontAwesomeIcon icon={faEllipsisVertical} className="h-3.5 w-3.5" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align={isMe ? "end" : "start"} className="w-32 bg-background/95 backdrop-blur-md border-border/50">
+              {isMe && message.messageType === 'TEXT' && (message.createdAt && (new Date().getTime() - new Date(message.createdAt).getTime()) < 15000) && (
+                <DropdownMenuItem onClick={() => onEdit(message)} className="gap-2 cursor-pointer">
+                  <FontAwesomeIcon icon={faPen} className="h-3 w-3 text-primary" />
+                  <span className="text-xs">Edit</span>
+                </DropdownMenuItem>
+              )}
+              {isMe && (
+                <DropdownMenuItem 
+                  onClick={() => onDelete?.(message.id)} 
+                  className="gap-2 cursor-pointer text-destructive focus:text-destructive"
+                >
+                  <FontAwesomeIcon icon={faTrash} className="h-3 w-3" />
+                  <span className="text-xs">Delete</span>
+                </DropdownMenuItem>
+              )}
+              <DropdownMenuItem onClick={() => onForward?.(message)} className="gap-2 cursor-pointer text-sky-500 focus:text-sky-500">
+                <FontAwesomeIcon icon={faShare} className="h-3 w-3" />
+                <span className="text-xs">Forward</span>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      )}
     </div>
   );
 });

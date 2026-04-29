@@ -36,8 +36,8 @@ export class ChatController {
     @Body() body: any,
     @UploadedFile() file?: Express.Multer.File,
   ) {
-    const { receiverId, message, type, isEncrypted, clientMsgId, fileUrl, fileName, fileSize } = body;
-    console.log('DEBUG: sendMessage body:', { receiverId, type, isEncrypted, fileUrl: !!fileUrl, fileName: !!fileName });
+    const { receiverId, message, type, isEncrypted, clientMsgId, fileUrl, fileName, fileSize, isForwarded } = body;
+    console.log('DEBUG: sendMessage body:', { receiverId, type, isEncrypted, fileUrl: !!fileUrl, fileName: !!fileName, isForwarded });
     
     const user = req.user as any;
     return this.chatService.sendMessage(
@@ -50,7 +50,8 @@ export class ChatController {
       clientMsgId,
       fileUrl,
       fileName,
-      fileSize
+      fileSize,
+      String(isForwarded) === 'true' || isForwarded === true
     );
   }
 
@@ -111,4 +112,25 @@ export class ChatController {
   async getPublicKey(@Param('username') username: string) {
     return this.chatService.getPublicKey(username);
   }
+
+  @Post('update/:messageId')
+  async updateMessage(
+    @Req() req: express.Request,
+    @Param('messageId') messageId: string,
+    @Body('message') message: string,
+  ) {
+    const user = req.user as any;
+    return this.chatService.updateMessage(user.userId, Number(messageId), message);
+  }
+
+  @Post('delete/:messageId')
+  async deleteMessage(
+    @Req() req: express.Request,
+    @Param('messageId') messageId: string,
+  ) {
+    const user = req.user as any;
+    return this.chatService.deleteMessage(user.userId, Number(messageId));
+  }
 }
+
+
