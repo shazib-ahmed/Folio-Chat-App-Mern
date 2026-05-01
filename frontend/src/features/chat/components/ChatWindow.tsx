@@ -1318,14 +1318,21 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
               <div className="flex gap-5 text-muted-foreground items-center">
                 <FontAwesomeIcon
                   icon={faVideo}
-                  className={cn("h-4 w-4 cursor-pointer hover:text-foreground", isBlocked && "opacity-20 cursor-not-allowed")}
-                  onClick={() => !isBlocked && chat && onStartVideoCall?.(chat)}
+                  className={cn(
+                    "h-4 w-4 cursor-pointer hover:text-foreground transition-all", 
+                    (isBlocked || chatStatus === 'PENDING') && "opacity-20 cursor-not-allowed hover:text-muted-foreground"
+                  )}
+                  onClick={() => !isBlocked && chatStatus === 'ACCEPTED' && chat && onStartVideoCall?.(chat)}
+                  title={chatStatus === 'PENDING' ? "Accept request to start video call" : "Start Video Call"}
                 />
                 <FontAwesomeIcon
                   icon={faPhone}
-                  className={cn("h-4 w-4 cursor-pointer hover:text-foreground", isBlocked && "opacity-20 cursor-not-allowed")}
+                  className={cn(
+                    "h-4 w-4 cursor-pointer hover:text-foreground transition-all", 
+                    (isBlocked || chatStatus === 'PENDING') && "opacity-20 cursor-not-allowed hover:text-muted-foreground"
+                  )}
                   onClick={() => {
-                    if (!isBlocked && chat) {
+                    if (!isBlocked && chatStatus === 'ACCEPTED' && chat) {
                       startCall({
                         id: chat.id.toString(),
                         name: chat.name,
@@ -1333,6 +1340,7 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
                       });
                     }
                   }}
+                  title={chatStatus === 'PENDING' ? "Accept request to start audio call" : "Start Audio Call"}
                 />
                 <FontAwesomeIcon
                   icon={faSearch}

@@ -154,8 +154,20 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   // --- WebRTC Signaling ---
 
   @SubscribeMessage('call:request')
-  handleCallRequest(@MessageBody() data: { to: number; from: number; fromName: string; fromAvatar?: string; type: 'audio' | 'video' }) {
+  async handleCallRequest(@MessageBody() data: { to: number; from: number; fromName: string; fromAvatar?: string; type: 'audio' | 'video' }) {
     console.log(`Call request from ${data.from} to ${data.to}`);
+    
+    // Security check: Only allow calls if the chat request is ACCEPTED
+    const roomIdStr = [data.from, data.to].sort((a, b) => a - b).join('_');
+    const chatRoom = await this.prisma.chatRoom.findUnique({
+      where: { chatRoomId: roomIdStr }
+    });
+
+    if (!chatRoom || chatRoom.status !== 'ACCEPTED') {
+      console.log(`Call blocked: Chat room ${roomIdStr} status is ${chatRoom?.status || 'NOT_FOUND'}`);
+      return;
+    }
+
     this.sendMessageToUser(data.to, 'call:request', data);
   }
 
