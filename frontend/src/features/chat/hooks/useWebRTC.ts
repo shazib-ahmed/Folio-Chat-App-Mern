@@ -32,6 +32,7 @@ export const useWebRTC = ({ currentUserId, currentUserName, currentUserUsername,
   const localStreamRef = useRef<MediaStream | null>(null);
   const pendingOfferRef = useRef<any>(null);
   const isCallerRef = useRef(false);
+  const partnerRef = useRef<{ id: string; name: string; username: string; avatar?: string } | null>(null);
   
   // Timers and Duration
   const ringTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -216,17 +217,21 @@ export const useWebRTC = ({ currentUserId, currentUserName, currentUserUsername,
         logId
       });
 
-      // BOTH parties now log the call locally for instant feedback
-      if (isCallerRef.current) {
-        if (callStateRef.current === 'CONNECTED' && duration !== undefined) {
-          onLogCall?.('ENDED', duration, logId, true, partner.id, partner.name, partner.username);
-        } else if (callStateRef.current === 'OFFERING' || callStateRef.current === 'RINGING') {
-          onLogCall?.('MISSED', undefined, logId, true, partner.id, partner.name, partner.username);
+      const logCall = (type: 'MISSED' | 'REJECTED' | 'ENDED' | 'NO_ANSWER' | 'BUSY', duration?: number) => {
+        // ONLY the caller logs to the database to prevent duplicates and ensure correct side placement (Right for sender, Left for receiver)
+        const currentPartner = partnerRef.current;
+        if (isCallerRef.current && currentPartner) {
+          onLogCall?.(type, duration, logId, true, currentPartner.id, currentPartner.name, currentPartner.username);
         }
-      } else {
-        // If receiver ends a connected call
+      };
+
+      if (callStateRef.current === 'CONNECTED' || callStateRef.current === 'OFFERING' || callStateRef.current === 'RINGING' || callStateRef.current === 'BUSY') {
+        const duration = startTimeRef.current ? Math.floor((Date.now() - startTimeRef.current) / 1000) : undefined;
+        
         if (callStateRef.current === 'CONNECTED' && duration !== undefined) {
-          onLogCall?.('ENDED', duration, logId, false, partner.id, partner.name, partner.username);
+          logCall('ENDED', duration);
+        } else if (callStateRef.current === 'OFFERING' || callStateRef.current === 'RINGING') {
+          logCall('MISSED');
         }
       }
     }
@@ -235,15 +240,17 @@ export const useWebRTC = ({ currentUserId, currentUserName, currentUserUsername,
   };
 
   const rejectCall = () => {
-    if (partner) {
+    if (partnerRef.current) {
       const logId = `log-${Date.now()}`;
       getSocket()?.emit('call:reject', {
-        to: Number(partner.id),
+        to: Number(partnerRef.current.id),
         from: Number(currentUserId),
         logId
       });
-      // Receiver logs the rejection optimistically, but NOT as owner (caller notified via socket will own it)
-      onLogCall?.('REJECTED', undefined, logId, false, partner.id, partner.name, partner.username);
+      if (isCallerRef.current && partnerRef.current) {
+        const p = partnerRef.current;
+        onLogCall?.('REJECTED', undefined, logId, true, p.id, p.name, p.username);
+      }
     }
     cleanup();
   };
@@ -296,7 +303,9 @@ export const useWebRTC = ({ currentUserId, currentUserName, currentUserUsername,
 
       s.on('call:request', (data: any) => {
         isCallerRef.current = false;
-        setPartner({ id: data.from.toString(), name: data.fromName, username: data.fromUsername, avatar: data.fromAvatar });
+        const p = { id: data.from.toString(), name: data.fromName, username: data.fromUsername, avatar: data.fromAvatar };
+        setPartner(p);
+        partnerRef.current = p;
         pendingOfferRef.current = data.offer;
         updateCallState('RINGING');
         ringtoneRef.current?.play().catch(e => console.log('Audio play failed:', e));
@@ -329,17 +338,19 @@ export const useWebRTC = ({ currentUserId, currentUserName, currentUserUsername,
       });
 
       s.on('call:reject', (data: any) => {
-        if (isCallerRef.current && (callStateRef.current === 'OFFERING' || callStateRef.current === 'RINGING')) {
-          onLogCall?.('REJECTED', undefined, data.logId, true, partner?.id, partner?.name, partner?.username);
+        const p = partnerRef.current;
+        if (isCallerRef.current && p && (callStateRef.current === 'OFFERING' || callStateRef.current === 'RINGING')) {
+          onLogCall?.('REJECTED', undefined, data.logId, true, p.id, p.name, p.username);
         }
         cleanup();
       });
 
       s.on('call:end', (data: any) => {
         const duration = data.duration || (startTimeRef.current ? Math.floor((Date.now() - startTimeRef.current) / 1000) : 0);
-        if (callStateRef.current === 'CONNECTED' || callStateRef.current === 'OFFERING' || callStateRef.current === 'RINGING') {
+        const p = partnerRef.current;
+        if (isCallerRef.current && p && (callStateRef.current === 'CONNECTED' || callStateRef.current === 'OFFERING' || callStateRef.current === 'RINGING')) {
           const type = (callStateRef.current === 'CONNECTED') ? 'ENDED' : (data.reason === 'timeout' ? 'NO_ANSWER' : 'MISSED');
-          onLogCall?.(type, duration, data.logId, isCallerRef.current, partner?.id, partner?.name, partner?.username);
+          onLogCall?.(type, duration, data.logId, true, p.id, p.name, p.username);
         }
         cleanup();
         onCallEnded?.();
@@ -363,7 +374,7 @@ export const useWebRTC = ({ currentUserId, currentUserName, currentUserUsername,
         socket.off('call:end');
       }
     };
-  }, [currentUserId, createPeerConnection, cleanup, stopTones, onIncomingCall, onCallAccepted, onCallEnded, onLogCall, callState, partner?.id, partner?.name, partner?.username]);
+  }, [currentUserId, createPeerConnection, cleanup, stopTones, onIncomingCall, onCallAccepted, onCallEnded, onLogCall, callState]);
 
   return {
     callState,

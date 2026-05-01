@@ -230,6 +230,15 @@ function ChatLayout() {
 				const isMine = String(msg.senderId) === String(user.id);
 				const sidebarChatId = isMine ? msg.receiverId : msg.senderId;
 
+        // Play notification sound for incoming messages (not calls, not mine)
+        if (!isMine && msg.messageType !== 'CALL') {
+          const notificationSound = new Audio('/message_notification.mp3');
+          notificationSound.volume = 0.5;
+          notificationSound.play().catch(e => {
+            console.warn('Sound play failed (interaction required):', e.message);
+          });
+        }
+
 				if (sidebarChatId) {
 					let displayMessage = (msg.isEncrypted && msg.text) ? msg.text : (msg.sidebarText || msg.text || '');
 					
@@ -280,26 +289,8 @@ function ChatLayout() {
       }
     });
 
-      // Handle high-priority call log synchronization
-      const socket = getSocket();
-      if (socket) {
-        socket.on('call:log_sync', (msg: any) => {
-          console.log('Syncing call log from server:', msg);
-          // We only update the sidebar here. The ChatWindow handles its own message history via local socket listener.
-          dispatch(updateChatLastMessage({
-            chatId: msg.senderId === String(user?.id) ? msg.receiverId : msg.senderId,
-            message: msg.sidebarText || msg.text,
-            time: msg.createdAt,
-            isMine: msg.senderId === String(user?.id),
-            sender: msg.sender,
-            lastMessageId: msg.id,
-            lastMessageSenderId: msg.senderId,
-            lastMessageType: msg.messageType
-          }));
-        });
-      }
-
       // Handle User Status (Online/Offline)
+      const socket = getSocket();
       if (socket) {
         socket.on('userStatus', (data: { userId: number; isOnline: boolean; lastSeen?: string }) => {
           dispatch(setUserStatus({ 

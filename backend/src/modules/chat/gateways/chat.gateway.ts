@@ -203,32 +203,6 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
           `busy-log-${Date.now()}`
         );
         console.log(`Backend: Missed call log saved with ID ${savedMsg.id}`);
-        
-        // Force a high-priority UI sync for the receiver
-        const socketPayload = {
-          id: savedMsg.id.toString(),
-          senderId: data.from.toString(),
-          receiverId: data.to.toString(),
-          text: 'Missed call',
-          sidebarText: 'Missed call',
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          messageType: 'CALL',
-          createdAt: new Date().toISOString(),
-          sender: {
-            id: data.from.toString(),
-            name: data.fromName,
-            username: data.fromUsername,
-            avatar: data.fromAvatar
-          }
-        };
-        this.sendMessageToUser(data.to, 'call:log_sync', socketPayload);
-        
-        // Also notify the caller to sync their UI
-        this.sendMessageToUser(data.from, 'call:log_sync', {
-          ...socketPayload,
-          sidebarText: `${data.to} was busy`, // For caller's sidebar
-          text: `${data.to} was busy`
-        });
       } catch (err) {
         console.error('CRITICAL: Failed to auto-log busy call:', err.message);
       }
