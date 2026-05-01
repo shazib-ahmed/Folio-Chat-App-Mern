@@ -96,7 +96,7 @@ export const setPublicKeyApi = async (publicKey: string): Promise<any> => {
   return response.data;
 };
 
-export const getPublicKeyApi = async (username: string): Promise<string | null> => {
+export const getPublicKeyApi = async (username: string): Promise<any> => {
   const response = await api.get(`/chat/user/${username}/public-key`);
   return response.data;
 };

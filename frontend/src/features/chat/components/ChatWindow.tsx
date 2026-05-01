@@ -125,9 +125,10 @@ export function ChatWindow({
     setIsTyping(false); // Reset typing status when switching chats
   }, [chat]);
 
+  const { isE2eeInitialized } = useSelector((state: RootState) => state.chat);
   // Fetch messages and public key when chat changes
   useEffect(() => {
-    if (chat?.username) {
+    if (chat?.username && isE2eeInitialized) {
       setIsLoadingMessages(true);
       setLocalMessages([]); // Clear messages immediately when switching chats
       setRecipientPublicKey(null);
@@ -156,12 +157,12 @@ export function ChatWindow({
             try {
               const parsed = JSON.parse(msg.text);
               if (parsed.fileMeta) {
-                decryptedText = parsed.text ? await decryptMessage(parsed.text, privateKey, isSender) : "";
+                decryptedText = parsed.text ? await decryptMessage(parsed.text, privateKey, isSender, msg.id) : "";
                 fileMeta = parsed.fileMeta;
               } else if (parsed.iv) {
                 // If it has iv/r/s but no fileMeta, it's either text or just fileMeta
                 if (parsed.c || parsed.text) {
-                  decryptedText = await decryptMessage(msg.text, privateKey, isSender);
+                  decryptedText = await decryptMessage(msg.text, privateKey, isSender, msg.id);
                 } else if (parsed.m) {
                   fileMeta = msg.text;
                   decryptedText = "";
@@ -175,18 +176,18 @@ export function ChatWindow({
 
           // 2. Decrypt fileUrl if it's an encrypted payload
           if (msg.fileUrl && isEncryptedPayload(msg.fileUrl)) {
-            decryptedFileUrl = await decryptMessage(msg.fileUrl, privateKey, isSender);
+            decryptedFileUrl = await decryptMessage(msg.fileUrl, privateKey, isSender, msg.id);
           }
 
           // 3. Decrypt fileName if it's an encrypted payload
           if (msg.fileName && isEncryptedPayload(msg.fileName)) {
-            decryptedFileName = await decryptMessage(msg.fileName, privateKey, isSender);
+            decryptedFileName = await decryptMessage(msg.fileName, privateKey, isSender, msg.id);
           }
 
           // 4. Decrypt fileSize if it's an encrypted payload
           let decryptedFileSize = msg.fileSize;
           if (msg.fileSize && isEncryptedPayload(msg.fileSize)) {
-            decryptedFileSize = await decryptMessage(msg.fileSize, privateKey, isSender);
+            decryptedFileSize = await decryptMessage(msg.fileSize, privateKey, isSender, msg.id);
           }
 
           let decryptedReply = msg.replyTo;
@@ -238,7 +239,7 @@ export function ChatWindow({
     } else {
       setLocalMessages([]);
     }
-  }, [chat?.id, chat?.username, me?.id, me?.username, dispatch]);
+  }, [chat?.id, chat?.username, me?.id, me?.username, dispatch, isE2eeInitialized]);
 
   // Handle message search with debounce and cancellation
   useEffect(() => {

@@ -23,14 +23,25 @@ const b64Encode = (bytes: Uint8Array): string => {
   return window.btoa(binary);
 };
 
-const b64Decode = (str: string): Uint8Array => {
-  const binary = window.atob(str);
-  const len = binary.length;
-  const bytes = new Uint8Array(len);
-  for (let i = 0; i < len; i++) {
-    bytes[i] = binary.charCodeAt(i);
+export const b64Decode = (str: string): Uint8Array => {
+  if (typeof str !== 'string') {
+    console.error("b64Decode: Expected string, got", typeof str, str);
+    return new Uint8Array(0);
   }
-  return bytes;
+  // Strip PEM headers/footers and whitespace
+  const cleanStr = str.replace(/-----BEGIN [A-Z ]+-----|-----END [A-Z ]+-----|\s/g, "").trim();
+  try {
+    const binary = window.atob(cleanStr);
+    const len = binary.length;
+    const bytes = new Uint8Array(len);
+    for (let i = 0; i < len; i++) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    return bytes;
+  } catch (e) {
+    console.error("b64Decode failed for string:", cleanStr.substring(0, 20) + "...");
+    throw e;
+  }
 };
 
 // --- IndexedDB Storage ---
@@ -137,12 +148,7 @@ const uint8ArrayToBase64 = (arr: Uint8Array): string => {
 };
 
 const base64ToUint8Array = (base64: string): Uint8Array => {
-  const binary = atob(base64);
-  const arr = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) {
-    arr[i] = binary.charCodeAt(i);
-  }
-  return arr;
+  return b64Decode(base64);
 };
 
 // --- Key Management ---
@@ -156,9 +162,32 @@ export const exportPublicKey = async (publicKey: CryptoKey): Promise<string> => 
   return uint8ArrayToBase64(new Uint8Array(exported));
 };
 
-export const importPublicKey = async (pem: string): Promise<CryptoKey> => {
-  const bytes = base64ToUint8Array(pem);
+export const importPublicKey = async (pem: any): Promise<CryptoKey> => {
+  let finalPem = pem;
+  try {
+    // Check if it's already an object
+    if (typeof pem === 'object' && pem !== null) {
+      if (pem.pub) finalPem = pem.pub;
+    }
+    // Check if it's a JSON string
+    else if (typeof pem === 'string' && pem.startsWith('{')) {
+      const parsed = JSON.parse(pem);
+      if (parsed.pub) finalPem = parsed.pub;
+    }
+  } catch (e) {}
+
+  const bytes = base64ToUint8Array(finalPem);
   return window.crypto.subtle.importKey("spki", bytes.buffer as ArrayBuffer, KEY_PAIR_ALGORITHM, true, ["encrypt"]);
+};
+
+export const exportPrivateKey = async (privateKey: CryptoKey): Promise<string> => {
+  const exported = await window.crypto.subtle.exportKey("pkcs8", privateKey);
+  return uint8ArrayToBase64(new Uint8Array(exported));
+};
+
+export const importPrivateKey = async (pem: string): Promise<CryptoKey> => {
+  const bytes = base64ToUint8Array(pem);
+  return window.crypto.subtle.importKey("pkcs8", bytes.buffer as ArrayBuffer, KEY_PAIR_ALGORITHM, true, ["decrypt"]);
 };
 
 // --- Encryption / Decryption ---
@@ -228,7 +257,7 @@ export const isEncryptedPayload = (val: any): boolean => {
   }
 };
 
-export const decryptMessage = async (jsonCipher: string, privateKey: CryptoKey, isSender: boolean): Promise<string> => {
+export const decryptMessage = async (jsonCipher: string, privateKey: CryptoKey, isSender: boolean, msgId?: string): Promise<string> => {
   try {
     if (!jsonCipher || !isEncryptedPayload(jsonCipher)) return jsonCipher || "";
     
@@ -239,9 +268,15 @@ export const decryptMessage = async (jsonCipher: string, privateKey: CryptoKey, 
     if (!encryptedAesKeyB64) return "[Decryption key missing]";
 
     const encryptedContent = base64ToUint8Array(data.c || data.text || "");
-    if (!data.c && !data.text && data.m) {
-      // It's a file metadata only message, nothing to decrypt as "text"
-      return "";
+    if (!encryptedContent || encryptedContent.length === 0) {
+      if (data.m) return ""; // File metadata only
+      console.error(`DEBUG: Empty encrypted content for msg ${msgId}`);
+      return "[Empty content]";
+    }
+
+    if (!iv || iv.length === 0) {
+      console.error(`DEBUG: Missing IV for msg ${msgId}`);
+      return "[Missing IV]";
     }
 
     // 1. Decrypt AES key with RSA
@@ -249,6 +284,7 @@ export const decryptMessage = async (jsonCipher: string, privateKey: CryptoKey, 
     let decryptedAesKeyRaw: ArrayBuffer;
 
     try {
+      console.log(`DEBUG: Decrypting AES key for ${isSender ? 'sender' : 'recipient'} slot... (msg ${msgId})`);
       decryptedAesKeyRaw = await window.crypto.subtle.decrypt(
         { name: "RSA-OAEP" },
         privateKey,
@@ -256,15 +292,19 @@ export const decryptMessage = async (jsonCipher: string, privateKey: CryptoKey, 
       ) as ArrayBuffer;
     } catch (err) {
       // Fallback: Try the other key slot
-      console.log("DEBUG: Primary text decryption failed, trying fallback slot...");
+      console.log(`DEBUG: Primary slot failed (msg ${msgId}), trying fallback slot...`);
       encryptedAesKeyToUse = isSender ? data.r : data.s;
-      if (!encryptedAesKeyToUse) throw new Error("No fallback key slot available");
+      if (!encryptedAesKeyToUse) {
+        console.error("DEBUG: No fallback key slot available in payload:", data);
+        throw new Error("No fallback key slot available");
+      }
       
       decryptedAesKeyRaw = await window.crypto.subtle.decrypt(
         { name: "RSA-OAEP" },
         privateKey,
         base64ToUint8Array(encryptedAesKeyToUse) as any
       ) as ArrayBuffer;
+      console.log("DEBUG: Fallback decryption succeeded!");
     }
 
     const aesKey = await window.crypto.subtle.importKey(
@@ -284,7 +324,7 @@ export const decryptMessage = async (jsonCipher: string, privateKey: CryptoKey, 
 
     return new TextDecoder().decode(decryptedContent as any);
   } catch (error: any) {
-    console.error("Decryption failed:", error);
+    console.error(`Decryption failed for msg ${msgId || 'unknown'}:`, error);
     return "[Unable to decrypt message]";
   }
 };

@@ -16,9 +16,10 @@ import { ProtectedRoute, PublicRoute } from '@/routes/ProtectedRoute';
 import { useDispatch, useSelector } from 'react-redux';
 import { RootState, AppDispatch } from '@/app/store';
 import { initiateSocketConnection, disconnectSocket, subscribeToMessages, getSocket } from '@/shared/lib/socket';
-import { fetchChatList, updateChatLastMessage, setTypingStatus, setUserStatus, updateChatStatus, updateChatPreview } from '@/features/chat/chatSlice';
+import { fetchChatList, updateChatLastMessage, setTypingStatus, setUserStatus, updateChatStatus, updateChatPreview, setE2eeInitialized } from '@/features/chat/chatSlice';
 import { getUserByUsernameApi, setPublicKeyApi, getPublicKeyApi, sendMessageApi } from '@/features/chat/chatService';
-import { generateE2EEKeys, saveKeys, exportPublicKey, getLocalKeys, encryptForBoth } from '@/shared/lib/cryptoUtils';
+import { generateE2EEKeys, saveKeys, exportPublicKey, getLocalKeys, encryptForBoth, exportPrivateKey, importPrivateKey, importPublicKey } from '@/shared/lib/cryptoUtils';
+import { encryptData, decryptData } from '@/shared/utils/encryption';
 import { useWebRTC } from '@/features/chat/hooks/useWebRTC';
 import { CallOverlay } from '@/features/chat/components/CallOverlay';
 
@@ -164,26 +165,128 @@ function ChatLayout() {
 
       const initializeE2EE = async () => {
         try {
+          const APP_ENCRYPTION_KEY = process.env.APP_ENCRYPTION_KEY;
+          if (!APP_ENCRYPTION_KEY) {
+             console.warn("APP_ENCRYPTION_KEY is missing. E2EE sync will not work across devices.");
+          }
+
           // Check if user has a public key on the server
-          const serverPubKey = await getPublicKeyApi(user.username);
+          const serverKeyPayload = await getPublicKeyApi(user.username);
+          console.log("DEBUG: serverKeyPayload type:", typeof serverKeyPayload, "value:", serverKeyPayload);
+          
           const localKeys = await getLocalKeys(String(user.id));
 
           if (!localKeys) {
+            // Check if it's a backup (either JSON string or parsed object)
+            const isBackup = (typeof serverKeyPayload === 'string' && serverKeyPayload.startsWith('{')) || 
+                            (typeof serverKeyPayload === 'object' && serverKeyPayload !== null && (serverKeyPayload as any).pub && (serverKeyPayload as any).priv);
+
+            if (serverKeyPayload && isBackup && APP_ENCRYPTION_KEY) {
+              console.log("Restoring E2EE keys from server backup...");
+              try {
+                const parsed = typeof serverKeyPayload === 'string' ? JSON.parse(serverKeyPayload) : serverKeyPayload;
+                if (parsed.priv) {
+                  const decryptedPrivPem = decryptData(parsed.priv);
+                  if (decryptedPrivPem) {
+                    const privateKey = await importPrivateKey(decryptedPrivPem);
+                    const publicKey = await importPublicKey(parsed.pub); 
+                    
+                    await saveKeys(String(user.id), { privateKey, publicKey });
+                    console.log("E2EE keys restored successfully.");
+                    return;
+                  } else {
+                    console.error("Restoration failed: Decrypted private key is empty or invalid. Check APP_ENCRYPTION_KEY.");
+                  }
+                }
+              } catch (e) {
+                console.error("Failed to restore keys from backup:", e);
+              }
+            }
+
             console.log("Generating new E2EE keys...");
             const keys = await generateE2EEKeys();
             await saveKeys(String(user.id), keys);
+            
             const pubPem = await exportPublicKey(keys.publicKey);
-            await setPublicKeyApi(pubPem);
-            console.log("E2EE keys generated and registered.");
-          } else if (!serverPubKey) {
-            console.log("Local key exists but missing on server. Re-syncing existing key...");
-            // Re-register the existing public key
-            const pubPem = await exportPublicKey(localKeys.publicKey);
-            await setPublicKeyApi(pubPem);
-            console.log("E2EE public key re-registered with server.");
+            const privPem = await exportPrivateKey(keys.privateKey);
+            
+            // Back up both to server (priv is encrypted)
+            if (APP_ENCRYPTION_KEY) {
+               const backupPayload = JSON.stringify({
+                 pub: pubPem,
+                 priv: encryptData(privPem)
+               });
+               await setPublicKeyApi(backupPayload);
+            } else {
+               await setPublicKeyApi(pubPem);
+            }
+            console.log("E2EE keys generated and backed up to server.");
+          } else {
+            // Local keys exist, check if server needs an upgrade/re-sync
+            const isBackup = (typeof serverKeyPayload === 'string' && serverKeyPayload.startsWith('{')) || 
+                            (typeof serverKeyPayload === 'object' && serverKeyPayload !== null && (serverKeyPayload as any).pub && (serverKeyPayload as any).priv);
+            
+            const needsUpgrade = serverKeyPayload && !isBackup;
+            const missingOnServer = !serverKeyPayload;
+            
+            // Check for mismatch
+            let isMismatch = false;
+            if (isBackup) {
+               try {
+                 const parsed = typeof serverKeyPayload === 'string' ? JSON.parse(serverKeyPayload) : serverKeyPayload;
+                 const localPubPem = (await exportPublicKey(localKeys!.publicKey)).trim();
+                 const serverPubPem = (parsed.pub || "").trim();
+                 console.log("DEBUG: Local Pub Key (start):", localPubPem.substring(0, 20));
+                 console.log("DEBUG: Server Pub Key (start):", serverPubPem.substring(0, 20));
+                 
+                 if (serverPubPem !== localPubPem) {
+                   isMismatch = true;
+                   console.log("E2EE Mismatch detected between local and server keys.");
+                 }
+               } catch (e) {}
+            } else if (serverKeyPayload && typeof serverKeyPayload === 'string') {
+               const localPubPem = (await exportPublicKey(localKeys!.publicKey)).trim();
+               const serverPubPem = serverKeyPayload.trim();
+               if (serverPubPem !== localPubPem) {
+                 isMismatch = true;
+                 console.log("E2EE Mismatch detected (Server has plain public key).");
+               }
+            }
+
+            if (isMismatch && isBackup && APP_ENCRYPTION_KEY) {
+              console.log("Attempting to resolve mismatch by restoring from server backup...");
+              try {
+                const parsed = typeof serverKeyPayload === 'string' ? JSON.parse(serverKeyPayload) : serverKeyPayload;
+                const decryptedPrivPem = decryptData(parsed.priv);
+                if (decryptedPrivPem) {
+                   const privateKey = await importPrivateKey(decryptedPrivPem);
+                   const publicKey = await importPublicKey(parsed.pub);
+                   await saveKeys(String(user.id), { privateKey, publicKey });
+                   console.log("Resolved mismatch: Server keys restored to local storage.");
+                   return;
+                }
+              } catch (e) {
+                console.error("Failed to resolve mismatch via restore:", e);
+              }
+            }
+
+            if ((needsUpgrade || missingOnServer || isMismatch) && APP_ENCRYPTION_KEY) {
+              console.log("Syncing/Backing up local key to server...");
+              const pubPem = await exportPublicKey(localKeys!.publicKey);
+              const privPem = await exportPrivateKey(localKeys!.privateKey);
+              
+              const backupPayload = JSON.stringify({
+                pub: pubPem,
+                priv: encryptData(privPem)
+              });
+              await setPublicKeyApi(backupPayload);
+              console.log("E2EE key sync completed.");
+            }
           }
         } catch (err) {
           console.error("Failed to initialize E2EE:", err);
+        } finally {
+          dispatch(setE2eeInitialized(true));
         }
       };
       initializeE2EE();

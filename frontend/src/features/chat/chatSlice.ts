@@ -6,6 +6,7 @@ interface ChatState {
   chats: Chat[];
   typingUsers: { [chatId: string]: boolean };
   isLoading: boolean;
+  isE2eeInitialized: boolean;
   error: string | null;
 }
 
@@ -13,6 +14,7 @@ const initialState: ChatState = {
   chats: [],
   typingUsers: {},
   isLoading: false,
+  isE2eeInitialized: false,
   error: null,
 };
 
@@ -160,6 +162,9 @@ const chatSlice = createSlice({
           chat.isEncrypted = isEncrypted;
         }
       }
+    },
+    setE2eeInitialized: (state, action: PayloadAction<boolean>) => {
+      state.isE2eeInitialized = action.payload;
     }
   },
   extraReducers: (builder) => {
@@ -179,5 +184,5 @@ const chatSlice = createSlice({
   },
 });
 
-export const { setChats, selectChat, updateChatLastMessage, clearUnreadCount, setTypingStatus, setUserStatus, updateChatStatus, updateChatPreview } = chatSlice.actions;
+export const { setChats, selectChat, updateChatLastMessage, clearUnreadCount, setTypingStatus, setUserStatus, updateChatStatus, updateChatPreview, setE2eeInitialized } = chatSlice.actions;
 export default chatSlice.reducer;
