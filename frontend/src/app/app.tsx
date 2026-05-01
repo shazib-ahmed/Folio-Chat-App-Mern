@@ -27,7 +27,7 @@ function ChatLayout() {
   const { pathname } = useLocation();
   const navigate = useNavigate();
   const dispatch = useDispatch<AppDispatch>();
-  const { user } = useSelector((state: RootState) => state.auth);
+  const { user, token } = useSelector((state: RootState) => state.auth);
   const { chats } = useSelector((state: RootState) => state.chat);
   const [selectedUser, setSelectedUser] = React.useState<Chat | undefined>(undefined);
 
@@ -41,7 +41,10 @@ function ChatLayout() {
     if (!currentPartner) return;
 
     let plainText = '';
-    if (type === 'MISSED' || type === 'NO_ANSWER') {
+    if (type === 'MISSED') {
+      plainText = isOwner ? 'Missed call' : `Missed call from ${currentPartner.name}`;
+    }
+    else if (type === 'NO_ANSWER') {
       plainText = isOwner ? 'No answer' : `Missed call from ${currentPartner.name}`;
     }
     else if (type === 'REJECTED') {
@@ -138,8 +141,8 @@ function ChatLayout() {
   }, [remoteStream]);
   
   React.useEffect(() => {
-    if (user?.id) {
-      initiateSocketConnection(user.id);
+    if (user?.id && token) {
+      initiateSocketConnection(user.id, token);
 
       const initializeE2EE = async () => {
         try {
@@ -183,7 +186,7 @@ function ChatLayout() {
       window.removeEventListener('beforeunload', handleBeforeUnload);
       disconnectSocket();
     };
-  }, [user?.id, user?.username, dispatch]);
+  }, [user?.id, user?.username, token, dispatch]);
 
   React.useEffect(() => {
     dispatch(fetchChatList());
@@ -219,8 +222,10 @@ function ChatLayout() {
 						const isReceiver = String(msg.receiverId) === String(user.id);
 						const lowerText = msg.text?.toLowerCase() || '';
 						
-						if (lowerText.includes('missed') || lowerText.includes('no answer')) {
-							displayMessage = isReceiver ? `Missed call from ${msg.sender?.name || 'User'}` : 'No answer';
+						if (lowerText.includes('missed') || lowerText === 'no answer') {
+							displayMessage = isReceiver 
+								? `Missed call from ${msg.sender?.name || 'User'}` 
+								: (lowerText === 'no answer' ? 'No answer' : 'Missed call');
 						} else if (lowerText.includes('declined')) {
 							displayMessage = isReceiver ? 'You declined the call' : `${msg.receiver?.name || 'User'} declined`;
 						} else {

@@ -11,6 +11,7 @@ import { Server, Socket } from 'socket.io';
 import { PrismaService } from 'src/database/prisma.service';
 import { forwardRef, Inject } from '@nestjs/common';
 import { ChatService } from '../chat.service';
+import { JwtService } from '@nestjs/jwt';
 
 @WebSocketGateway({
   cors: {
@@ -24,7 +25,8 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   constructor(
     private prisma: PrismaService,
     @Inject(forwardRef(() => ChatService))
-    private chatService: ChatService
+    private chatService: ChatService,
+    private jwtService: JwtService
   ) {}
 
   // Map to track connected users: userId -> Set of socketIds
@@ -33,30 +35,52 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   private socketToUser: Map<string, number> = new Map();
 
   async handleConnection(client: Socket) {
-    const userId = client.handshake.query.userId;
-    if (userId && !isNaN(Number(userId))) {
-      const uId = Number(userId);
+    try {
+      const token = client.handshake.auth?.token || client.handshake.query?.token;
+      
+      if (!token) {
+        console.log(`Connection rejected: No token provided for socket ${client.id}`);
+        client.disconnect();
+        return;
+      }
+
+      const payload = await this.jwtService.verifyAsync(token as string);
+      const uId = Number(payload.userId || payload.sub);
+
+      if (!uId || isNaN(uId)) {
+        console.log(`Connection rejected: Invalid payload for socket ${client.id}`);
+        client.disconnect();
+        return;
+      }
       
       // Add to user's sockets
       if (!this.connectedUsers.has(uId)) {
         this.connectedUsers.set(uId, new Set());
       }
-      this.connectedUsers.get(uId)!.add(client.id);
+      const userSockets = this.connectedUsers.get(uId)!;
+      userSockets.add(client.id);
       this.socketToUser.set(client.id, uId);
       
       // Update database status only if this is the first connection
-      if (this.connectedUsers.get(uId)!.size === 1) {
-        await this.prisma.user.update({
-          where: { id: uId },
-          data: { isOnline: true }
-        });
+      if (userSockets.size === 1) {
+        try {
+          await this.prisma.user.update({
+            where: { id: uId },
+            data: { isOnline: true }
+          });
 
-        // Broadcast status change
-        this.server.emit('userStatus', { userId: uId, isOnline: true });
-        console.log(`User ${uId} is now online (first tab connected)`);
+          // Broadcast status change
+          this.server.emit('userStatus', { userId: uId, isOnline: true });
+          console.log(`User ${uId} is now online (first tab connected)`);
+        } catch (err) {
+          console.error(`Failed to update online status for user ${uId}:`, err.message);
+        }
       }
       
-      console.log(`Socket connected: ${client.id} for user: ${uId}. Total sockets: ${this.connectedUsers.get(uId)!.size}`);
+      console.log(`Socket connected: ${client.id} for user: ${uId}. Total sockets: ${userSockets.size}`);
+    } catch (err) {
+      console.log(`Connection rejected: Invalid token for socket ${client.id}. Error: ${err.message}`);
+      client.disconnect();
     }
   }
 
@@ -157,17 +181,6 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   async handleCallRequest(@MessageBody() data: { to: number; from: number; fromName: string; fromAvatar?: string; type: 'audio' | 'video' }) {
     console.log(`Call request from ${data.from} to ${data.to}`);
     
-    // Security check: Only allow calls if the chat request is ACCEPTED
-    const roomIdStr = [data.from, data.to].sort((a, b) => a - b).join('_');
-    const chatRoom = await this.prisma.chatRoom.findUnique({
-      where: { chatRoomId: roomIdStr }
-    });
-
-    if (!chatRoom || chatRoom.status !== 'ACCEPTED') {
-      console.log(`Call blocked: Chat room ${roomIdStr} status is ${chatRoom?.status || 'NOT_FOUND'}`);
-      return;
-    }
-
     this.sendMessageToUser(data.to, 'call:request', data);
   }
 

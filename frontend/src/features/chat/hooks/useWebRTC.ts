@@ -257,72 +257,86 @@ export const useWebRTC = ({ currentUserId, currentUserName, currentUserAvatar, o
   };
 
   useEffect(() => {
-    const socket = getSocket();
-    if (!socket) return;
-
-    socket.on('call:request', (data) => {
-      isCallerRef.current = false;
-      setPartner({ id: data.from.toString(), name: data.fromName, avatar: data.fromAvatar });
-      pendingOfferRef.current = data.offer;
-      updateCallState('RINGING');
-      ringtoneRef.current?.play().catch(e => console.log('Audio play failed:', e));
-      onIncomingCall?.(data);
-
-      // Recipient side timeout also (45s)
-      ringTimeoutRef.current = setTimeout(() => {
-        cleanup();
-      }, 45000);
-    });
-
-    socket.on('call:answer', async (data) => {
-      if (pcRef.current) {
-        stopTones();
-        if (ringTimeoutRef.current) clearTimeout(ringTimeoutRef.current);
-        await pcRef.current.setRemoteDescription(new RTCSessionDescription(data.answer));
-        startTimeRef.current = Date.now();
-        updateCallState('CONNECTED');
-        onCallAccepted?.();
-      }
-    });
-
-    socket.on('call:ice-candidate', async (data) => {
-      if (pcRef.current && pcRef.current.remoteDescription) {
-        try {
-          await pcRef.current.addIceCandidate(new RTCIceCandidate(data.candidate));
-        } catch (err) {
-          console.error('Error adding ICE candidate:', err);
+    let socket = getSocket();
+    
+    // If socket isn't ready yet, try again in a bit
+    const checkInterval = setInterval(() => {
+      if (!socket) {
+        socket = getSocket();
+        if (socket) {
+          attachListeners(socket);
+          clearInterval(checkInterval);
         }
       }
-    });
+    }, 500);
 
-    socket.on('call:reject', (data) => {
-      // Caller logs the rejection when notified by receiver
-      if (isCallerRef.current && (callStateRef.current === 'OFFERING' || callStateRef.current === 'RINGING')) {
-        onLogCall?.('REJECTED', undefined, data.logId, true);
-      }
-      cleanup();
-    });
+    const attachListeners = (s: any) => {
+      s.on('call:request', (data: any) => {
+        isCallerRef.current = false;
+        setPartner({ id: data.from.toString(), name: data.fromName, avatar: data.fromAvatar });
+        pendingOfferRef.current = data.offer;
+        updateCallState('RINGING');
+        ringtoneRef.current?.play().catch(e => console.log('Audio play failed:', e));
+        onIncomingCall?.(data);
 
-    socket.on('call:end', (data) => {
-      // If call was connected, both sides should have a duration
-      const duration = data.duration || (startTimeRef.current ? Math.floor((Date.now() - startTimeRef.current) / 1000) : 0);
-      
-      // Fix: Both sides should log for instant feedback
-      if (callStateRef.current === 'CONNECTED' || callStateRef.current === 'OFFERING' || callStateRef.current === 'RINGING') {
-        const type = (callStateRef.current === 'CONNECTED') ? 'ENDED' : (data.reason === 'timeout' ? 'NO_ANSWER' : 'MISSED');
-        onLogCall?.(type, duration, data.logId, isCallerRef.current);
-      }
-      
-      cleanup();
-      onCallEnded?.();
-    });
+        ringTimeoutRef.current = setTimeout(() => {
+          cleanup();
+        }, 45000);
+      });
+
+      s.on('call:answer', async (data: any) => {
+        if (pcRef.current) {
+          stopTones();
+          if (ringTimeoutRef.current) clearTimeout(ringTimeoutRef.current);
+          await pcRef.current.setRemoteDescription(new RTCSessionDescription(data.answer));
+          startTimeRef.current = Date.now();
+          updateCallState('CONNECTED');
+          onCallAccepted?.();
+        }
+      });
+
+      s.on('call:ice-candidate', async (data: any) => {
+        if (pcRef.current && pcRef.current.remoteDescription) {
+          try {
+            await pcRef.current.addIceCandidate(new RTCIceCandidate(data.candidate));
+          } catch (err) {
+            console.error('Error adding ICE candidate:', err);
+          }
+        }
+      });
+
+      s.on('call:reject', (data: any) => {
+        if (isCallerRef.current && (callStateRef.current === 'OFFERING' || callStateRef.current === 'RINGING')) {
+          onLogCall?.('REJECTED', undefined, data.logId, true);
+        }
+        cleanup();
+      });
+
+      s.on('call:end', (data: any) => {
+        const duration = data.duration || (startTimeRef.current ? Math.floor((Date.now() - startTimeRef.current) / 1000) : 0);
+        if (callStateRef.current === 'CONNECTED' || callStateRef.current === 'OFFERING' || callStateRef.current === 'RINGING') {
+          const type = (callStateRef.current === 'CONNECTED') ? 'ENDED' : (data.reason === 'timeout' ? 'NO_ANSWER' : 'MISSED');
+          onLogCall?.(type, duration, data.logId, isCallerRef.current);
+        }
+        cleanup();
+        onCallEnded?.();
+      });
+    };
+
+    if (socket) {
+      attachListeners(socket);
+      clearInterval(checkInterval);
+    }
 
     return () => {
-      socket.off('call:request');
-      socket.off('call:answer');
-      socket.off('call:ice-candidate');
-      socket.off('call:reject');
-      socket.off('call:end');
+      clearInterval(checkInterval);
+      if (socket) {
+        socket.off('call:request');
+        socket.off('call:answer');
+        socket.off('call:ice-candidate');
+        socket.off('call:reject');
+        socket.off('call:end');
+      }
     };
   }, [currentUserId, createPeerConnection, cleanup, stopTones, onIncomingCall, onCallAccepted, onCallEnded, onLogCall, callState]);
 

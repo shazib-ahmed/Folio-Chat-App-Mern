@@ -51,9 +51,10 @@ const setupGlobalListeners = () => {
 
 
 
-export const initiateSocketConnection = (userId: string | number) => {
+export const initiateSocketConnection = (userId: string | number, token: string) => {
 	socket = io(SOCKET_URL, {
 		query: { userId: userId.toString() },
+		auth: { token }
 	});
 	console.log(`Connecting socket for user: ${userId}...`);
 	setupGlobalListeners();

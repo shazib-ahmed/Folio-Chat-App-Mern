@@ -32,10 +32,12 @@ export function ChatListItem({ chat, isActive, onClick }: ChatListItemProps) {
         // Handle deleted placeholders
         if (msg.includes('🚫') || msg.toLowerCase().includes('deleted a message')) {
           msg = chat.isForwarded ? "Content unavailable" : (isSender ? "You deleted a message" : `${chat.name} deleted a message`);
+        } else if (msg.toLowerCase() === 'missed call' && isSender) {
+          msg = "You made a missed call";
         } else if (chat.isForwarded && !msg.includes('Forwarded')) {
           msg = forwardPrefix + msg;
         }
-        setDisplayText(isSender && !msg.startsWith('You:') ? `You: ${msg}` : msg);
+        setDisplayText(isSender && !msg.startsWith('You:') && !msg.startsWith('You made') ? `You: ${msg}` : msg);
         return;
       }
 
@@ -79,9 +81,11 @@ export function ChatListItem({ chat, isActive, onClick }: ChatListItemProps) {
 
         if (final.startsWith('[Unable') || final.startsWith('[Decryption')) {
           final = "🔒 Encrypted Message";
+        } else if (final.toLowerCase() === 'missed call' && isSender) {
+          final = "You made a missed call";
         }
 
-        setDisplayText(forwardPrefix + (isSender && !final.startsWith('You:') ? "You: " : "") + final);
+        setDisplayText(forwardPrefix + (isSender && !final.startsWith('You:') && !final.startsWith('You made') ? "You: " : "") + final);
       } catch (err) {
         setDisplayText(forwardPrefix + (isSender ? "You: " : "") + "🔒 Encrypted Message");
       }
