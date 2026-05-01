@@ -516,10 +516,8 @@ function ChatLayout() {
           />
         ) : (
           <div className="flex-1 flex flex-col items-center justify-center text-muted-foreground p-8 text-center bg-accent/5">
-            <div className="w-24 h-24 bg-accent/20 rounded-full flex items-center justify-center mb-6">
-               <svg viewBox="0 0 24 24" className="w-12 h-12 text-primary opacity-20" fill="currentColor">
-                  <path d="M12 2C6.477 2 2 6.477 2 12c0 1.891.527 3.657 1.442 5.16L2 22l4.84-1.442A9.957 9.957 0 0012 22c5.523 0 10-4.477 10-10S17.523 2 12 2zm0 18c-1.63 0-3.146-.483-4.42-1.313l-3.125.933.933-3.125A7.957 7.957 0 014 12c0-4.411 3.589-8 8-8s8 3.589 8 8-3.589 8-8 8z" />
-               </svg>
+            <div className="w-24 h-24 bg-primary/10 rounded-3xl flex items-center justify-center mb-6 overflow-hidden">
+               <img src="/logo.jpg" alt="Folio-Messenger Logo" className="w-full h-full object-cover" />
             </div>
             <h2 className="text-2xl font-semibold text-foreground mb-2">Folio-Messenger</h2>
             <p className="max-w-md">Select a conversation or start a new one to begin messaging. Your messages are end-to-end encrypted.</p>
