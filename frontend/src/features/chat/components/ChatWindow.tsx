@@ -91,6 +91,66 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
+  const onLogCall = React.useCallback(async (type: 'MISSED' | 'REJECTED' | 'ENDED' | 'NO_ANSWER', duration?: number, providedLogId?: string, isOwner?: boolean) => {
+    if (!chat || !me) return;
+
+    let plainText = '';
+    if (type === 'MISSED') plainText = 'Missed audio call';
+    else if (type === 'NO_ANSWER') {
+      plainText = isOwner ? 'No answer' : 'Missed audio call';
+    }
+    else if (type === 'REJECTED') plainText = 'Declined audio call';
+    else if (type === 'ENDED') {
+      const mins = Math.floor((duration || 0) / 60);
+      const secs = (duration || 0) % 60;
+      plainText = `Audio call (${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')})`;
+    }
+
+    const clientMsgId = providedLogId || `log-${Date.now()}`;
+    
+    // Optimistic update for BOTH sides
+    const optimisticLog: Message = {
+      id: clientMsgId,
+      senderId: String(me.id), 
+      text: plainText,
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      status: 'pending' as any,
+      messageType: 'CALL',
+      isEncrypted: true
+    };
+    
+    setLocalMessages(prev => {
+      if (prev.some(m => m.id === clientMsgId)) return prev;
+      return [...prev, optimisticLog];
+    });
+
+    // ONLY the owner (caller) saves to DB
+    if (!isOwner) return;
+
+    try {
+      const rKey = recipientPublicKey || await getPublicKeyApi(chat.username);
+      const mKey = myPublicKey || await getPublicKeyApi(me.username);
+
+      let encryptedText = plainText;
+      if (rKey && mKey) {
+        encryptedText = await encryptForBoth(plainText, rKey, mKey);
+      }
+
+      await sendMessageApi(
+        chat.id, 
+        encryptedText, 
+        'CALL', 
+        undefined, 
+        !!(rKey && mKey),
+        clientMsgId
+      );
+    } catch (err) {
+      console.error('Failed to log call:', err);
+      // Only remove if it was our own optimistic message
+      setLocalMessages(prev => prev.filter(m => m.id !== clientMsgId));
+    }
+  }, [chat, me, recipientPublicKey, myPublicKey]);
+
   const {
     callState,
     remoteStream,
@@ -114,62 +174,7 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
     onCallEnded: () => {
       console.log('Call ended');
     },
-    onLogCall: React.useCallback(async (type, duration, providedLogId, isOwner) => {
-      if (!chat || !me) return;
-
-      let plainText = '';
-      if (type === 'MISSED') plainText = 'Missed audio call';
-      else if (type === 'REJECTED') plainText = 'Declined audio call';
-      else if (type === 'ENDED') {
-        const mins = Math.floor((duration || 0) / 60);
-        const secs = (duration || 0) % 60;
-        plainText = `Audio call (${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')})`;
-      }
-
-      const clientMsgId = providedLogId || `log-${Date.now()}`;
-      
-      // Optimistic update for BOTH sides
-      const optimisticLog: Message = {
-        id: clientMsgId,
-        senderId: String(me.id), 
-        text: plainText,
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        status: 'pending' as any,
-        messageType: 'CALL',
-        isEncrypted: true
-      };
-      
-      setLocalMessages(prev => {
-        if (prev.some(m => m.id === clientMsgId)) return prev;
-        return [...prev, optimisticLog];
-      });
-
-      // ONLY the owner (caller) saves to DB
-      if (!isOwner) return;
-
-      try {
-        const rKey = recipientPublicKey || await getPublicKeyApi(chat.username);
-        const mKey = myPublicKey || await getPublicKeyApi(me.username);
-
-        let encryptedText = plainText;
-        if (rKey && mKey) {
-          encryptedText = await encryptForBoth(plainText, rKey, mKey);
-        }
-
-        await sendMessageApi(
-          chat.id, 
-          encryptedText, 
-          'CALL', 
-          undefined, 
-          !!(rKey && mKey),
-          clientMsgId
-        );
-      } catch (err) {
-        console.error('Failed to log call:', err);
-        // Only remove if it was our own optimistic message
-        setLocalMessages(prev => prev.filter(m => m.id !== clientMsgId));
-      }
-    }, [chat, me, recipientPublicKey, myPublicKey])
+    onLogCall
   });
 
   // Attach remote stream to audio element

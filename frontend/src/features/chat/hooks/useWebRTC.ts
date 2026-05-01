@@ -10,7 +10,7 @@ interface UseWebRTCProps {
   onIncomingCall?: (data: { from: string; fromName: string; fromAvatar?: string }) => void;
   onCallAccepted?: () => void;
   onCallEnded?: () => void;
-  onLogCall?: (type: 'MISSED' | 'REJECTED' | 'ENDED', duration?: number, logId?: string, isOwner?: boolean) => void;
+  onLogCall?: (type: 'MISSED' | 'REJECTED' | 'ENDED' | 'NO_ANSWER', duration?: number, logId?: string, isOwner?: boolean) => void;
 }
 
 export const useWebRTC = ({ currentUserId, currentUserName, currentUserAvatar, onIncomingCall, onCallAccepted, onCallEnded, onLogCall }: UseWebRTCProps) => {
@@ -127,14 +127,21 @@ export const useWebRTC = ({ currentUserId, currentUserName, currentUserAvatar, o
       updateCallState('OFFERING');
       callingToneRef.current?.play().catch(e => console.log('Audio play failed:', e));
 
-      // 30s timeout for missed call
+      // 45s timeout for missed call
       ringTimeoutRef.current = setTimeout(() => {
-        // Guard: Only the Caller logs a MISSED call
         if ((callStateRef.current === 'OFFERING' || callStateRef.current === 'RINGING') && isCallerRef.current) {
-          onLogCall?.('MISSED');
-          endCall();
+          const logId = `log-${Date.now()}`;
+          getSocket()?.emit('call:end', {
+            to: Number(targetUser.id),
+            from: Number(currentUserId),
+            logId,
+            reason: 'timeout'
+          });
+          onLogCall?.('NO_ANSWER', undefined, logId, true);
+          cleanup();
+          onCallEnded?.();
         }
-      }, 30000);
+      }, 45000);
 
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       localStreamRef.current = stream;
@@ -261,10 +268,10 @@ export const useWebRTC = ({ currentUserId, currentUserName, currentUserAvatar, o
       ringtoneRef.current?.play().catch(e => console.log('Audio play failed:', e));
       onIncomingCall?.(data);
 
-      // Recipient side timeout also
+      // Recipient side timeout also (45s)
       ringTimeoutRef.current = setTimeout(() => {
         cleanup();
-      }, 30000);
+      }, 45000);
     });
 
     socket.on('call:answer', async (data) => {
@@ -300,9 +307,9 @@ export const useWebRTC = ({ currentUserId, currentUserName, currentUserAvatar, o
       // If call was connected, both sides should have a duration
       const duration = data.duration || (startTimeRef.current ? Math.floor((Date.now() - startTimeRef.current) / 1000) : 0);
       
-      // If I didn't log it yet (e.g. I was the passive side of the 'end'), log it now
-      if (callStateRef.current === 'CONNECTED' || (isCallerRef.current && (callStateRef.current === 'OFFERING' || callStateRef.current === 'RINGING'))) {
-        const type = (callStateRef.current === 'CONNECTED') ? 'ENDED' : 'MISSED';
+      // Fix: Both sides should log for instant feedback
+      if (callStateRef.current === 'CONNECTED' || callStateRef.current === 'OFFERING' || callStateRef.current === 'RINGING') {
+        const type = (callStateRef.current === 'CONNECTED') ? 'ENDED' : (data.reason === 'timeout' ? 'NO_ANSWER' : 'MISSED');
         onLogCall?.(type, duration, data.logId, isCallerRef.current);
       }
       

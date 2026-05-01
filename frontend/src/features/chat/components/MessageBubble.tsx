@@ -289,7 +289,7 @@ export const MessageBubble = React.memo(({ message, isMe, onEdit, onDelete, onFo
         window.URL.revokeObjectURL(currentBlobUrl);
       }
     };
-  }, [message.id, message.fileUrl, message.fileMeta, message.text, message.fileName, message.fileSize, message.isEncrypted, message.messageType, message.replyTo, message.replyTo?.text, message.replyTo?.senderId, message.replyTo?.messageType, isMe, me?.id]);
+  }, [message.id, message.fileUrl, message.fileMeta, message.text, message.fileName, message.fileSize, message.isEncrypted, message.messageType, message.replyTo, message.replyTo?.text, message.replyTo?.senderId, message.replyTo?.messageType, isMe, me?.id, rawText]);
 
 
   const handleDownload = async (e: React.MouseEvent, url: string, fileName: string) => {
@@ -545,14 +545,18 @@ export const MessageBubble = React.memo(({ message, isMe, onEdit, onDelete, onFo
                 </div>
                 <div className="flex-1 min-w-0 pr-1">
                   <p className="text-[12px] font-bold truncate leading-tight mb-0.5">
-                    {activeText?.toLowerCase().includes('missed') 
-                      ? (isMe ? 'You made a missed call' : `You have a missed call from ${otherName || 'User'}`) 
+                    {activeText?.toLowerCase().includes('missed') || activeText?.toLowerCase().includes('no answer')
+                      ? (isMe 
+                          ? (activeText?.toLowerCase().includes('no answer') ? 'No answer' : 'You made a missed call') 
+                          : `You have a missed call from ${otherName || 'User'}`) 
                       : (activeText?.toLowerCase().includes('declined') 
                           ? (isMe ? 'You declined the call' : 'Call was declined')
                           : activeText || 'Audio call')}
                   </p>
                   <p className="text-[10px] opacity-70 font-semibold tracking-wide uppercase">
-                    {activeText?.toLowerCase().includes('missed') ? 'Missed Call' : (activeText?.toLowerCase().includes('declined') ? 'Declined Call' : 'Voice Call')}
+                    {(activeText?.toLowerCase().includes('missed') || activeText?.toLowerCase().includes('no answer')) 
+                      ? 'Missed Call' 
+                      : (activeText?.toLowerCase().includes('declined') ? 'Declined Call' : 'Voice Call')}
                   </p>
                 </div>
               </div>
