@@ -41,6 +41,20 @@ export interface Message {
     userId: string;
     emoji: string;
   }[];
+  sender?: {
+    id: string;
+    name: string;
+    username: string;
+    avatar?: string;
+    online?: boolean;
+  };
+  receiver?: {
+    id: string;
+    name: string;
+    username: string;
+    avatar?: string;
+    online?: boolean;
+  };
 }
 
 

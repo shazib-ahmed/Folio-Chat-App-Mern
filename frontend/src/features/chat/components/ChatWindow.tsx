@@ -114,7 +114,7 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
     onCallEnded: () => {
       console.log('Call ended');
     },
-    onLogCall: async (type, duration) => {
+    onLogCall: React.useCallback(async (type, duration, providedLogId, isOwner) => {
       if (!chat || !me) return;
 
       let plainText = '';
@@ -126,29 +126,34 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
         plainText = `Audio call (${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')})`;
       }
 
-      const clientMsgId = `log-${Date.now()}`;
+      const clientMsgId = providedLogId || `log-${Date.now()}`;
       
-      // Optimistic update
+      // Optimistic update for BOTH sides
       const optimisticLog: Message = {
         id: clientMsgId,
-        senderId: String(me.id),
+        senderId: String(me.id), 
         text: plainText,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         status: 'pending' as any,
         messageType: 'CALL',
         isEncrypted: true
       };
-      setLocalMessages(prev => [...prev, optimisticLog]);
+      
+      setLocalMessages(prev => {
+        if (prev.some(m => m.id === clientMsgId)) return prev;
+        return [...prev, optimisticLog];
+      });
+
+      // ONLY the owner (caller) saves to DB
+      if (!isOwner) return;
 
       try {
-        const [recipientPubKey, myPubKey] = await Promise.all([
-          getPublicKeyApi(chat.username),
-          getPublicKeyApi(me.username)
-        ]);
+        const rKey = recipientPublicKey || await getPublicKeyApi(chat.username);
+        const mKey = myPublicKey || await getPublicKeyApi(me.username);
 
         let encryptedText = plainText;
-        if (recipientPubKey && myPubKey) {
-          encryptedText = await encryptForBoth(plainText, recipientPubKey, myPubKey);
+        if (rKey && mKey) {
+          encryptedText = await encryptForBoth(plainText, rKey, mKey);
         }
 
         await sendMessageApi(
@@ -156,14 +161,15 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
           encryptedText, 
           'CALL', 
           undefined, 
-          !!(recipientPubKey && myPubKey),
+          !!(rKey && mKey),
           clientMsgId
         );
       } catch (err) {
         console.error('Failed to log call:', err);
+        // Only remove if it was our own optimistic message
         setLocalMessages(prev => prev.filter(m => m.id !== clientMsgId));
       }
-    }
+    }, [chat, me, recipientPublicKey, myPublicKey])
   });
 
   // Attach remote stream to audio element
@@ -477,7 +483,7 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
       )) {
 
         const privateKey = me?.id ? await getLocalPrivateKey(String(me.id)) : null;
-        let decryptedText = msg.text;
+        let decryptedText = msg.text || msg.message || msg.content || "";
         let decryptedFileUrl = msg.fileUrl;
         let decryptedFileName = msg.fileName;
         let decryptedFileSize = msg.fileSize;
@@ -558,8 +564,8 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
         setLocalMessages(prev => {
           const isMine = String(msg.senderId) === String(me?.id);
 
-          if (isMine && msg.clientMsgId) {
-            // Find the specific temp message using clientMsgId
+          if (msg.clientMsgId) {
+            // Find the specific temp message using clientMsgId (regardless of who sent it)
             const tempIndex = prev.findIndex(m => m.id === msg.clientMsgId);
 
             if (tempIndex !== -1) {
@@ -1080,7 +1086,7 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
       if (data.messages && data.messages.length > 0) {
         const privateKey = me?.id ? await getLocalPrivateKey(String(me.id)) : null;
         const decryptedMessages = await Promise.all(data.messages.map(async (msg: any) => {
-          let decryptedText = msg.text;
+          let decryptedText = msg.text || msg.message || msg.content || "";
           let fileMeta = "";
 
           if (msg.isEncrypted && privateKey && msg.text) {
@@ -1521,45 +1527,49 @@ export function ChatWindow({ chat, onStartAudioCall, onStartVideoCall }: ChatWin
             <ChatWindowSkeleton />
           ) : (
             <div className="flex flex-col w-full gap-1">
-              {localMessages.map(msg => (
-                <div
-                  key={msg.id}
-                  id={`msg-${msg.id}`}
-                  className={cn(
-                    "transition-all duration-500 rounded-lg p-1",
-                    searchResults[searchMatchIndex] === msg.id && "bg-primary/10 ring-1 ring-primary/20",
-                    highlightedMessageId === msg.id && "bg-primary/20 ring-2 ring-primary/40 scale-[1.02] shadow-lg"
-                  )}
-                >
-                  <MessageBubble
-                    message={msg}
-                    isMe={String(msg.senderId) === String(me?.id)}
-                    otherName={chat?.username}
-                    onEdit={(m) => {
-                      setEditingMessage(m);
-                      setInputText(m.text || "");
-                    }}
-                    onDelete={async (id) => {
-                      setDeletingMessageId(id);
-                      try {
-                        await deleteMessageApi(id);
-                      } catch (err) {
-                        console.error('Failed to delete message:', err);
-                      } finally {
-                        setDeletingMessageId(null);
-                      }
-                    }}
-                    isDeleting={deletingMessageId === msg.id}
-                    onForward={(m) => {
-                      setForwardingMessage(m);
-                      setIsForwardModalOpen(true);
-                    }}
-                    onReply={(m) => setReplyingToMessage(m)}
-                    onScrollTo={scrollToMessage}
-                    onReact={handleReact}
-                  />
-                </div>
-              ))}
+              {localMessages.map(msg => {
+                const isMe = String(msg.senderId) === String(me?.id);
+                return (
+                  <div
+                    key={msg.id}
+                    id={`msg-${msg.id}`}
+                    className={cn(
+                      "flex w-full mb-1 group transition-all duration-500 rounded-lg p-1",
+                      isMe ? "justify-end" : "justify-start",
+                      searchResults[searchMatchIndex] === msg.id && "bg-primary/10 ring-1 ring-primary/20",
+                      highlightedMessageId === msg.id && "bg-primary/20 ring-2 ring-primary/40 scale-[1.02] shadow-lg"
+                    )}
+                  >
+                    <MessageBubble
+                      message={msg}
+                      isMe={isMe}
+                      otherName={chat?.username}
+                      onEdit={(m) => {
+                        setEditingMessage(m);
+                        setInputText(m.text || "");
+                      }}
+                      onDelete={async (id) => {
+                        setDeletingMessageId(id);
+                        try {
+                          await deleteMessageApi(id);
+                        } catch (err) {
+                          console.error('Failed to delete message:', err);
+                        } finally {
+                          setDeletingMessageId(null);
+                        }
+                      }}
+                      isDeleting={deletingMessageId === msg.id}
+                      onForward={(m) => {
+                        setForwardingMessage(m);
+                        setIsForwardModalOpen(true);
+                      }}
+                      onReply={(m) => setReplyingToMessage(m)}
+                      onScrollTo={scrollToMessage}
+                      onReact={handleReact}
+                    />
+                  </div>
+                );
+              })}
 
               {isTyping && (
                 <div className="flex justify-start mb-4 animate-in fade-in slide-in-from-left-4 duration-500">

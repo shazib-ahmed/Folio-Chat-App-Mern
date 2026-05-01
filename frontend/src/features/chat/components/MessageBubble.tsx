@@ -76,7 +76,7 @@ const VoiceMessage = React.memo(({ url, isMe }: { url: string; isMe?: boolean })
   };
 
   return (
-    <div className="flex items-center gap-3 py-1 min-w-[220px]">
+    <div className="flex items-center gap-3 py-1 min-w-[180px] max-w-full">
       <audio
         ref={audioRef}
         src={url}
@@ -89,23 +89,34 @@ const VoiceMessage = React.memo(({ url, isMe }: { url: string; isMe?: boolean })
         size="icon"
         onClick={togglePlay}
         className={cn(
-          "h-10 w-10 rounded-full shrink-0",
-          isMe ? "text-primary-foreground hover:bg-white/10" : "text-primary hover:bg-primary/10"
+          "h-10 w-10 rounded-full shrink-0 shadow-sm",
+          isMe ? "bg-white/20 text-white hover:bg-white/30" : "bg-primary/20 text-primary hover:bg-primary/30"
         )}
       >
-        <FontAwesomeIcon icon={isPlaying ? faPause : faPlay} className="h-5 w-5" />
+        <FontAwesomeIcon icon={isPlaying ? faPause : faPlay} className="text-sm" />
       </Button>
 
-      <div className="flex-1 space-y-1.5">
-        <div className="relative h-1.5 bg-black/10 dark:bg-white/10 rounded-full overflow-hidden">
+      <div className="flex-1 flex flex-col gap-1.5 min-w-0">
+        <div className="h-1.5 w-full bg-black/10 dark:bg-white/10 rounded-full overflow-hidden relative group cursor-pointer" 
+             onClick={(e) => {
+               if (audioRef.current) {
+                 const rect = e.currentTarget.getBoundingClientRect();
+                 const x = e.clientX - rect.left;
+                 const clickedValue = (x / rect.width) * audioRef.current.duration;
+                 audioRef.current.currentTime = clickedValue;
+               }
+             }}>
           <div
-            className={cn("absolute inset-0 rounded-full", isMe ? "bg-white" : "bg-primary")}
+            className={cn("h-full transition-all duration-100", isMe ? "bg-white" : "bg-primary")}
             style={{ width: `${progress}%` }}
           />
         </div>
-        <div className="flex justify-between items-center text-[10px] opacity-70">
-          <span>{isPlaying ? formatTime(audioRef.current?.currentTime || 0) : formatTime(duration)}</span>
-          <FontAwesomeIcon icon={faMicrophone} className="text-[11px]" />
+        <div className="flex justify-between items-center text-[10px] font-bold opacity-70 px-0.5">
+          <span>{formatTime(audioRef.current?.currentTime || 0)}</span>
+          <span className="flex items-center gap-1.5 tracking-tight uppercase">
+            <FontAwesomeIcon icon={faMicrophone} className="text-[9px]" />
+            {formatTime(duration)}
+          </span>
         </div>
       </div>
     </div>
@@ -126,10 +137,11 @@ export const MessageBubble = React.memo(({ message, isMe, onEdit, onDelete, onFo
   const [lastBlobUrl, setLastBlobUrl] = useState<string | null>(null);
   const [isPickerOpen, setIsPickerOpen] = useState(false);
 
+  const rawText = message.text || (message as any).message || (message as any).content || "";
   const activeUrl = decryptedUrl || sanitizeValue(message.fileUrl) || lastBlobUrl;
   const activeFileName = decryptedMeta.fileName || sanitizeValue(message.fileName);
   const activeFileSize = decryptedMeta.fileSize || sanitizeValue(message.fileSize);
-  const activeText = decryptedText || (isEncryptedPayload(message.text) ? 'Decrypting...' : message.text);
+  const activeText = decryptedText || (isEncryptedPayload(rawText) ? 'Decrypting...' : rawText);
 
   React.useEffect(() => {
     // Preserve blob URLs for optimistic updates
@@ -144,14 +156,14 @@ export const MessageBubble = React.memo(({ message, isMe, onEdit, onDelete, onFo
       let privateKey: CryptoKey | null = null;
 
       // 1. Decrypt parent message if encrypted
-      if (message.isEncrypted) {
+      if (message.isEncrypted || isEncryptedPayload(rawText)) {
         setIsDecrypting(true);
         try {
           privateKey = me?.id ? await getLocalPrivateKey(String(me.id)) : null;
           if (!privateKey || !isMounted) return;
 
           const isSender = isMe || false;
-          let cipherText = message.text || "";
+          let cipherText = rawText;
           let fileMeta = message.fileMeta;
 
           // Handle wrapped JSON
@@ -315,10 +327,10 @@ export const MessageBubble = React.memo(({ message, isMe, onEdit, onDelete, onFo
 
   return (
     <div className={cn(
-      "flex w-full mb-4 group items-start gap-1",
+      "flex items-start gap-2 max-w-[85%] md:max-w-[75%] lg:max-w-[65%]",
       isMe ? "flex-row-reverse" : "flex-row"
     )}>
-      <div className="relative">
+      <div className="relative w-fit shrink-0">
         {/* Reaction Picker (WhatsApp Style) */}
         {!message.isDeleted && !isDeleting && (
           <div className={cn(
@@ -344,7 +356,7 @@ export const MessageBubble = React.memo(({ message, isMe, onEdit, onDelete, onFo
           </div>
         )}
       <div className={cn(
-        "max-w-[85%] px-3 py-2 rounded-lg text-sm relative shadow-sm",
+        "w-fit px-4 py-2.5 rounded-2xl text-sm relative shadow-sm transition-all duration-200",
         isDeleting && "opacity-70 grayscale",
         message.isDeleted
           ? "bg-red-500/5 text-red-500/80 italic border border-red-500/20 shadow-none"
@@ -522,18 +534,24 @@ export const MessageBubble = React.memo(({ message, isMe, onEdit, onDelete, onFo
 
             {/* Call Logs */}
             {message.messageType === 'CALL' && (
-              <div className="flex items-center gap-3 py-1 min-w-[180px]">
+              <div className="flex items-center gap-3 py-2 px-1 min-w-[180px]">
                 <div className={cn(
-                  "w-9 h-9 rounded-full flex items-center justify-center shrink-0",
+                  "w-9 h-9 rounded-full flex items-center justify-center shrink-0 shadow-sm",
                   activeText?.toLowerCase().includes('missed') || activeText?.toLowerCase().includes('declined') 
-                    ? "bg-red-500/15 text-red-500" 
-                    : "bg-green-500/15 text-green-500"
+                    ? "bg-red-500/20 text-red-500" 
+                    : "bg-green-500/20 text-green-500"
                 )}>
                   <FontAwesomeIcon icon={faPhone} className="text-sm" />
                 </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-[11px] font-semibold truncate">{activeText || 'Audio call'}</p>
-                  <p className="text-[9px] opacity-60 font-medium">
+                <div className="flex-1 min-w-0 pr-1">
+                  <p className="text-[12px] font-bold truncate leading-tight mb-0.5">
+                    {activeText?.toLowerCase().includes('missed') 
+                      ? (isMe ? 'You made a missed call' : `You have a missed call from ${otherName || 'User'}`) 
+                      : (activeText?.toLowerCase().includes('declined') 
+                          ? (isMe ? 'You declined the call' : 'Call was declined')
+                          : activeText || 'Audio call')}
+                  </p>
+                  <p className="text-[10px] opacity-70 font-semibold tracking-wide uppercase">
                     {activeText?.toLowerCase().includes('missed') ? 'Missed Call' : (activeText?.toLowerCase().includes('declined') ? 'Declined Call' : 'Voice Call')}
                   </p>
                 </div>
@@ -541,8 +559,10 @@ export const MessageBubble = React.memo(({ message, isMe, onEdit, onDelete, onFo
             )}
 
             {/* Message Text / Caption */}
-            {((message.messageType === 'TEXT') || (message.fileUrl && activeText)) && (
-              <p className="leading-relaxed break-words whitespace-pre-wrap">{activeText}</p>
+            {message.messageType !== 'CALL' && (
+              <p className="leading-relaxed break-words whitespace-pre-wrap">
+                {activeText || message.text || (message as any).message || (message as any).content || ""}
+              </p>
             )}
             <div className="flex items-center justify-end gap-1.5 mt-1 select-none">
               {message.isEdited && <span className="text-[9px] opacity-40 font-medium italic">Edited</span>}

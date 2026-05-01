@@ -10,7 +10,7 @@ interface UseWebRTCProps {
   onIncomingCall?: (data: { from: string; fromName: string; fromAvatar?: string }) => void;
   onCallAccepted?: () => void;
   onCallEnded?: () => void;
-  onLogCall?: (type: 'MISSED' | 'REJECTED' | 'ENDED', duration?: number) => void;
+  onLogCall?: (type: 'MISSED' | 'REJECTED' | 'ENDED', duration?: number, logId?: string, isOwner?: boolean) => void;
 }
 
 export const useWebRTC = ({ currentUserId, currentUserName, currentUserAvatar, onIncomingCall, onCallAccepted, onCallEnded, onLogCall }: UseWebRTCProps) => {
@@ -198,15 +198,27 @@ export const useWebRTC = ({ currentUserId, currentUserName, currentUserAvatar, o
         ? Math.floor((Date.now() - startTimeRef.current) / 1000) 
         : undefined;
 
+      const logId = `log-${Date.now()}`;
+
       getSocket()?.emit('call:end', {
         to: Number(partner.id),
         from: Number(currentUserId),
-        duration // Pass duration so caller can log if they didn't have it
+        duration,
+        logId
       });
 
-      // ONLY the Caller logs the end of the call
-      if (isCallerRef.current && callStateRef.current === 'CONNECTED' && duration !== undefined) {
-        onLogCall?.('ENDED', duration);
+      // BOTH parties now log the call locally for instant feedback
+      if (isCallerRef.current) {
+        if (callStateRef.current === 'CONNECTED' && duration !== undefined) {
+          onLogCall?.('ENDED', duration, logId, true);
+        } else if (callStateRef.current === 'OFFERING' || callStateRef.current === 'RINGING') {
+          onLogCall?.('MISSED', undefined, logId, true);
+        }
+      } else {
+        // If receiver ends a connected call
+        if (callStateRef.current === 'CONNECTED' && duration !== undefined) {
+          onLogCall?.('ENDED', duration, logId, false);
+        }
       }
     }
     cleanup();
@@ -215,11 +227,14 @@ export const useWebRTC = ({ currentUserId, currentUserName, currentUserAvatar, o
 
   const rejectCall = () => {
     if (partner) {
+      const logId = `log-${Date.now()}`;
       getSocket()?.emit('call:reject', {
         to: Number(partner.id),
         from: Number(currentUserId),
+        logId
       });
-      // Receiver NO LONGER logs the rejection. They just notify the caller.
+      // Receiver logs the rejection optimistically, but NOT as owner (caller notified via socket will own it)
+      onLogCall?.('REJECTED', undefined, logId, false);
     }
     cleanup();
   };
@@ -273,20 +288,24 @@ export const useWebRTC = ({ currentUserId, currentUserName, currentUserAvatar, o
       }
     });
 
-    socket.on('call:reject', () => {
+    socket.on('call:reject', (data) => {
       // Caller logs the rejection when notified by receiver
       if (isCallerRef.current && (callStateRef.current === 'OFFERING' || callStateRef.current === 'RINGING')) {
-        onLogCall?.('REJECTED');
+        onLogCall?.('REJECTED', undefined, data.logId, true);
       }
       cleanup();
     });
 
     socket.on('call:end', (data) => {
-      // Caller logs the end when notified by receiver
-      if (isCallerRef.current && callStateRef.current === 'CONNECTED') {
-        const duration = data.duration || (startTimeRef.current ? Math.floor((Date.now() - startTimeRef.current) / 1000) : 0);
-        onLogCall?.('ENDED', duration);
+      // If call was connected, both sides should have a duration
+      const duration = data.duration || (startTimeRef.current ? Math.floor((Date.now() - startTimeRef.current) / 1000) : 0);
+      
+      // If I didn't log it yet (e.g. I was the passive side of the 'end'), log it now
+      if (callStateRef.current === 'CONNECTED' || (isCallerRef.current && (callStateRef.current === 'OFFERING' || callStateRef.current === 'RINGING'))) {
+        const type = (callStateRef.current === 'CONNECTED') ? 'ENDED' : 'MISSED';
+        onLogCall?.(type, duration, data.logId, isCallerRef.current);
       }
+      
       cleanup();
       onCallEnded?.();
     });
