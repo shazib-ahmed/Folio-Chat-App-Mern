@@ -1,6 +1,6 @@
 import { io, Socket } from 'socket.io-client';
 
-const SOCKET_URL = process.env.REACT_APP_SOCKET_URL || 'http://localhost:5000';
+const SOCKET_URL = process.env.REACT_APP_SOCKET_URL;
 
 let socket: Socket | null = null;
 let subscribers: ((err: Error | null, msg: any) => void)[] = [];
@@ -67,7 +67,7 @@ export const disconnectSocket = () => {
 
 export const subscribeToMessages = (cb: (err: Error | null, msg: any) => void) => {
 	subscribers.push(cb);
-	
+
 	return () => {
 		subscribers = subscribers.filter(s => s !== cb);
 	};
