@@ -23,7 +23,10 @@ async function bootstrap() {
     credentials: true,
   });
 
-  const port = process.env.PORT ?? 5000;
+  const port = process.env.PORT;
+  if (!port) {
+    throw new Error('PORT environment variable is not defined in .env file');
+  }
   await app.listen(port);
   console.log(`Application is running on: http://localhost:${port}/api`);
 }

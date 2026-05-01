@@ -1,8 +1,12 @@
 import CryptoJS from 'crypto-js';
 
-const SECRET_KEY = process.env.REACT_APP_ENCRYPTION_KEY || 'folio-chat-secret-key-123';
+const SECRET_KEY = process.env.APP_ENCRYPTION_KEY;
 
 export const encryptData = (data: any): string => {
+  if (!SECRET_KEY) {
+    console.error('Encryption error: APP_ENCRYPTION_KEY is not defined');
+    return '';
+  }
   try {
     const jsonString = JSON.stringify(data);
     return CryptoJS.AES.encrypt(jsonString, SECRET_KEY).toString();
@@ -13,6 +17,10 @@ export const encryptData = (data: any): string => {
 };
 
 export const decryptData = (encryptedData: string): any => {
+  if (!SECRET_KEY) {
+    console.error('Decryption error: APP_ENCRYPTION_KEY is not defined');
+    return null;
+  }
   try {
     if (!encryptedData) return null;
     const bytes = CryptoJS.AES.decrypt(encryptedData, SECRET_KEY);

@@ -107,7 +107,7 @@ export class AuthService {
   async refreshTokens(refreshToken: string) {
     try {
       const payload = await this.jwtService.verifyAsync(refreshToken, {
-        secret: this.configService.get<string>('JWT_SECRET') || 'fallbackSecret',
+        secret: this.configService.getOrThrow<string>('JWT_SECRET'),
       });
       
       const userId = payload.sub;
