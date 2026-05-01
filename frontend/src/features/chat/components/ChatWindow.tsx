@@ -1175,7 +1175,7 @@ export function ChatWindow({
   );
 
   return (
-    <div className="flex-1 h-full flex flex-col bg-[hsl(var(--chat-bg))] text-foreground overflow-hidden">
+    <div className="flex-1 h-full min-h-0 flex flex-col bg-[hsl(var(--chat-bg))] text-foreground overflow-hidden">
       {/* Header */}
       <div className="h-[60px] bg-[hsl(var(--chat-header-bg))] px-4 flex items-center justify-between shrink-0 border-b relative">
         {isSearching ? (
@@ -1572,7 +1572,7 @@ export function ChatWindow({
 
       {/* Input Area */}
       {!isLoadingMessages && (
-        <div className="bg-[hsl(var(--chat-header-bg))] border-t relative">
+        <div className="bg-[hsl(var(--chat-header-bg))] border-t relative shrink-0">
           {isBlocked ? (
             <div className="p-4 flex flex-col items-center justify-center bg-background/50 backdrop-blur-sm h-[80px]">
               <p className="text-sm text-muted-foreground mb-1">

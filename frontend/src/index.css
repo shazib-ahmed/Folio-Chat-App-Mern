@@ -88,7 +88,16 @@
   }
   body {
     @apply bg-background text-foreground;
+    height: 100dvh;
+    overflow: hidden;
   }
+}
+
+html, body, #root {
+  height: 100dvh;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
 }
 
 @keyframes typing-bounce {

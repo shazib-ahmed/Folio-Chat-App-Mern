@@ -454,7 +454,7 @@ function ChatLayout() {
   usePageTitle(pageTitle);
 
   return (
-    <div className="flex h-screen bg-background overflow-hidden">
+    <div className="flex h-full bg-background overflow-hidden">
       {/* Sidebar - hidden on mobile when a chat or settings content is selected */}
       <div className={cn(
         "w-full lg:w-[400px] border-r flex flex-col shrink-0",
@@ -465,7 +465,7 @@ function ChatLayout() {
 
       {/* Main Content */}
       <div className={cn(
-        "flex-1 flex flex-col min-w-0 h-full relative",
+        "flex-1 flex flex-col min-w-0 h-full relative overflow-hidden",
         !chatId && !isSettingsContent ? "hidden lg:flex" : "flex"
       )}>
         {isSettingsPage ? (
