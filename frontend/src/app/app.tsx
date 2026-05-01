@@ -117,7 +117,9 @@ function ChatLayout() {
 
   const {
     callState,
+    localStream,
     remoteStream,
+    callType,
     isMuted,
     partner: callPartner,
     startCall,
@@ -399,8 +401,8 @@ function ChatLayout() {
         ) : selectedUser ? (
           <ChatWindow 
             chat={selectedUser} 
-            onStartAudioCall={(c) => startCall({ id: c.id, name: c.name, username: c.username, avatar: c.avatar })}
-            onStartVideoCall={() => {}} 
+            onStartAudioCall={(c) => startCall({ id: c.id, name: c.name, username: c.username, avatar: c.avatar }, 'audio')}
+            onStartVideoCall={(c) => startCall({ id: c.id, name: c.name, username: c.username, avatar: c.avatar }, 'video')} 
             callState={callState}
             callPartner={callPartner}
             isMuted={isMuted}
@@ -421,7 +423,7 @@ function ChatLayout() {
           </div>
         )}
       </div>
-
+ 
       <CallOverlay
         state={callState as any}
         partner={callPartner}
@@ -430,6 +432,9 @@ function ChatLayout() {
         onReject={rejectCall}
         onEnd={endCall}
         onToggleMute={toggleMute}
+        callType={callType}
+        localStream={localStream}
+        remoteStream={remoteStream}
       />
     </div>
   );

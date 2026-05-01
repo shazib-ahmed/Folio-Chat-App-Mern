@@ -27,6 +27,8 @@ export const useWebRTC = ({ currentUserId, currentUserName, currentUserUsername,
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
   const [isMuted, setIsMuted] = useState(false);
   const [partner, setPartner] = useState<{ id: string; name: string; username: string; avatar?: string } | null>(null);
+  const [callType, setCallType] = useState<'audio' | 'video'>('audio');
+  const callTypeRef = useRef<'audio' | 'video'>('audio');
   
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
@@ -121,11 +123,18 @@ export const useWebRTC = ({ currentUserId, currentUserName, currentUserUsername,
     return pc;
   }, [currentUserId, cleanup, onCallEnded]);
 
-  const startCall = async (targetUser: { id: string; name: string; username: string; avatar?: string }) => {
+  const updateCallType = (type: 'audio' | 'video') => {
+    setCallType(type);
+    callTypeRef.current = type;
+  };
+
+  const startCall = async (targetUser: { id: string; name: string; username: string; avatar?: string }, type: 'audio' | 'video' = 'audio') => {
     try {
       cleanup();
       isCallerRef.current = true;
       setPartner(targetUser);
+      partnerRef.current = targetUser;
+      updateCallType(type);
       updateCallState('OFFERING');
       callingToneRef.current?.play().catch(e => console.log('Audio play failed:', e));
 
@@ -133,19 +142,23 @@ export const useWebRTC = ({ currentUserId, currentUserName, currentUserUsername,
       ringTimeoutRef.current = setTimeout(() => {
         if ((callStateRef.current === 'OFFERING' || callStateRef.current === 'RINGING') && isCallerRef.current) {
           const logId = `log-${Date.now()}`;
+          const currentPartner = partnerRef.current || targetUser;
           getSocket()?.emit('call:end', {
-            to: Number(targetUser.id),
+            to: Number(currentPartner.id),
             from: Number(currentUserId),
             logId,
             reason: 'timeout'
           });
-          onLogCall?.('NO_ANSWER', undefined, logId, true, targetUser.id, targetUser.name, targetUser.username);
+          onLogCall?.('NO_ANSWER', undefined, logId, true, currentPartner.id, currentPartner.name, currentPartner.username);
           cleanup();
           onCallEnded?.();
         }
       }, 45000);
 
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        audio: true, 
+        video: type === 'video' 
+      });
       localStreamRef.current = stream;
       setLocalStream(stream);
 
@@ -162,7 +175,7 @@ export const useWebRTC = ({ currentUserId, currentUserName, currentUserUsername,
         fromUsername: currentUserUsername,
         fromAvatar: currentUserAvatar,
         offer,
-        type: 'audio',
+        type: type,
       });
     } catch (err) {
       console.error('Failed to start call:', err);
@@ -176,7 +189,10 @@ export const useWebRTC = ({ currentUserId, currentUserName, currentUserUsername,
       stopTones();
       if (ringTimeoutRef.current) clearTimeout(ringTimeoutRef.current);
       
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        audio: true, 
+        video: callTypeRef.current === 'video' 
+      });
       localStreamRef.current = stream;
       setLocalStream(stream);
 
@@ -205,9 +221,9 @@ export const useWebRTC = ({ currentUserId, currentUserName, currentUserUsername,
   const endCall = () => {
     if (partner) {
       const duration = (callStateRef.current === 'CONNECTED' && startTimeRef.current) 
-        ? Math.floor((Date.now() - startTimeRef.current) / 1000) 
+        ? Math.floor((Date.now() - startTimeRef.current) / 1000)
         : undefined;
-
+      
       const logId = `log-${Date.now()}`;
 
       getSocket()?.emit('call:end', {
@@ -218,7 +234,6 @@ export const useWebRTC = ({ currentUserId, currentUserName, currentUserUsername,
       });
 
       const logCall = (type: 'MISSED' | 'REJECTED' | 'ENDED' | 'NO_ANSWER' | 'BUSY', duration?: number) => {
-        // ONLY the caller logs to the database to prevent duplicates and ensure correct side placement (Right for sender, Left for receiver)
         const currentPartner = partnerRef.current;
         if (isCallerRef.current && currentPartner) {
           onLogCall?.(type, duration, logId, true, currentPartner.id, currentPartner.name, currentPartner.username);
@@ -226,10 +241,10 @@ export const useWebRTC = ({ currentUserId, currentUserName, currentUserUsername,
       };
 
       if (callStateRef.current === 'CONNECTED' || callStateRef.current === 'OFFERING' || callStateRef.current === 'RINGING' || callStateRef.current === 'BUSY') {
-        const duration = startTimeRef.current ? Math.floor((Date.now() - startTimeRef.current) / 1000) : undefined;
+        const durationVal = startTimeRef.current ? Math.floor((Date.now() - startTimeRef.current) / 1000) : undefined;
         
-        if (callStateRef.current === 'CONNECTED' && duration !== undefined) {
-          logCall('ENDED', duration);
+        if (callStateRef.current === 'CONNECTED' && durationVal !== undefined) {
+          logCall('ENDED', durationVal);
         } else if (callStateRef.current === 'OFFERING' || callStateRef.current === 'RINGING') {
           logCall('MISSED');
         }
@@ -306,6 +321,7 @@ export const useWebRTC = ({ currentUserId, currentUserName, currentUserUsername,
         const p = { id: data.from.toString(), name: data.fromName, username: data.fromUsername, avatar: data.fromAvatar };
         setPartner(p);
         partnerRef.current = p;
+        updateCallType(data.type || 'audio');
         pendingOfferRef.current = data.offer;
         updateCallState('RINGING');
         ringtoneRef.current?.play().catch(e => console.log('Audio play failed:', e));
@@ -387,5 +403,6 @@ export const useWebRTC = ({ currentUserId, currentUserName, currentUserUsername,
     rejectCall,
     endCall,
     toggleMute,
+    callType,
   };
 };
