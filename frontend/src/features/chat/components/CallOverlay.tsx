@@ -6,7 +6,7 @@ import { Button } from '@/shared/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/shared/ui/avatar';
 
 interface CallOverlayProps {
-  state: 'OFFERING' | 'RINGING' | 'CONNECTED';
+  state: 'OFFERING' | 'RINGING' | 'CONNECTED' | 'BUSY';
   partner: { id: string; name: string; avatar?: string } | null;
   isMuted: boolean;
   onAccept: () => void;
@@ -44,7 +44,7 @@ export const CallOverlay: React.FC<CallOverlayProps> = ({
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
-  if (state === 'OFFERING' || state === 'RINGING' || state === 'CONNECTED') {
+  if (state === 'OFFERING' || state === 'RINGING' || state === 'CONNECTED' || state === 'BUSY') {
     return (
       <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 backdrop-blur-md animate-in fade-in duration-300">
         <div className="w-full max-w-sm p-8 flex flex-col items-center text-center animate-in zoom-in-95 duration-300">
@@ -67,6 +67,11 @@ export const CallOverlay: React.FC<CallOverlayProps> = ({
           <p className="text-white/90 font-semibold text-lg mb-12 drop-shadow-sm">
             {state === 'OFFERING' && "Calling..."}
             {state === 'RINGING' && "Incoming Audio Call"}
+            {state === 'BUSY' && (
+               <span className="text-red-500 font-bold uppercase tracking-widest text-xl drop-shadow-md">
+                 Busy in another call
+               </span>
+            )}
             {state === 'CONNECTED' && (
               <span className="flex flex-col gap-2">
                 <span className="text-primary font-bold tracking-widest text-3xl drop-shadow-md">{formatTimer(timer)}</span>

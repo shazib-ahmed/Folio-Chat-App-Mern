@@ -33,6 +33,8 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   private connectedUsers: Map<number, Set<string>> = new Map();
   // Map for fast lookup: socketId -> userId
   private socketToUser: Map<string, number> = new Map();
+  // Map to track active calls: userId -> boolean
+  private userInCall: Map<number, boolean> = new Map();
 
   async handleConnection(client: Socket) {
     try {
@@ -110,6 +112,9 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
             isOnline: false, 
             lastSeen: this.formatTime(lastSeen) 
           });
+
+          // Ensure they are removed from active calls if they disconnect
+          this.userInCall.delete(userId);
           
           console.log(`User ${userId} is now offline (all tabs closed)`);
         } else {
@@ -178,9 +183,60 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   // --- WebRTC Signaling ---
 
   @SubscribeMessage('call:request')
-  async handleCallRequest(@MessageBody() data: { to: number; from: number; fromName: string; fromAvatar?: string; type: 'audio' | 'video' }) {
+  async handleCallRequest(@MessageBody() data: { to: number; from: number; fromName: string; fromUsername: string; fromAvatar?: string; type: 'audio' | 'video' }) {
     console.log(`Call request from ${data.from} to ${data.to}`);
     
+    // Check if the receiver is already in a call
+    if (this.userInCall.get(data.to)) {
+      console.log(`User ${data.to} is busy, notifying ${data.from}`);
+      
+      // Automate the logging from the backend for 100% reliability
+      try {
+        console.log(`Backend: Saving missed call log for busy receiver ${data.to} from sender ${data.from}`);
+        const savedMsg = await this.chatService.sendMessage(
+          data.from, 
+          data.to, 
+          'Missed call', 
+          'CALL', 
+          undefined, 
+          false, 
+          `busy-log-${Date.now()}`
+        );
+        console.log(`Backend: Missed call log saved with ID ${savedMsg.id}`);
+        
+        // Force a high-priority UI sync for the receiver
+        const socketPayload = {
+          id: savedMsg.id.toString(),
+          senderId: data.from.toString(),
+          receiverId: data.to.toString(),
+          text: 'Missed call',
+          sidebarText: 'Missed call',
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          messageType: 'CALL',
+          createdAt: new Date().toISOString(),
+          sender: {
+            id: data.from.toString(),
+            name: data.fromName,
+            username: data.fromUsername,
+            avatar: data.fromAvatar
+          }
+        };
+        this.sendMessageToUser(data.to, 'call:log_sync', socketPayload);
+        
+        // Also notify the caller to sync their UI
+        this.sendMessageToUser(data.from, 'call:log_sync', {
+          ...socketPayload,
+          sidebarText: `${data.to} was busy`, // For caller's sidebar
+          text: `${data.to} was busy`
+        });
+      } catch (err) {
+        console.error('CRITICAL: Failed to auto-log busy call:', err.message);
+      }
+
+      this.sendMessageToUser(data.from, 'call:busy', { userId: data.to, name: 'User' }); 
+      return;
+    }
+
     this.sendMessageToUser(data.to, 'call:request', data);
   }
 
@@ -193,6 +249,9 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @SubscribeMessage('call:answer')
   handleCallAnswer(@MessageBody() data: { to: number; answer: any; from: number }) {
     console.log(`Call answer from ${data.from} to ${data.to}`);
+    // Mark both users as in a call
+    this.userInCall.set(data.from, true);
+    this.userInCall.set(data.to, true);
     this.sendMessageToUser(data.to, 'call:answer', data);
   }
 
@@ -210,6 +269,9 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @SubscribeMessage('call:end')
   handleCallEnd(@MessageBody() data: { to: number; from: number }) {
     console.log(`Call ended by ${data.from}, notifying ${data.to}`);
+    // Unmark both users
+    this.userInCall.delete(data.from);
+    this.userInCall.delete(data.to);
     this.sendMessageToUser(data.to, 'call:end', data);
   }
 }

@@ -32,17 +32,30 @@ function ChatLayout() {
   const [selectedUser, setSelectedUser] = React.useState<Chat | undefined>(undefined);
 
   // Global Call Logging Handler
-  const onLogCallGlobal = React.useCallback(async (type: 'MISSED' | 'REJECTED' | 'ENDED' | 'NO_ANSWER', duration?: number, providedLogId?: string, isOwner?: boolean) => {
+  const onLogCallGlobal = React.useCallback(async (
+    type: 'MISSED' | 'REJECTED' | 'ENDED' | 'NO_ANSWER' | 'BUSY', 
+    duration?: number, 
+    providedLogId?: string, 
+    isOwner?: boolean,
+    partnerId?: string,
+    partnerName?: string,
+    partnerUsername?: string
+  ) => {
     if (!user) return;
     
     // Determine which chat this log belongs to
-    // If we are currently in a call, we have a partner
-    const currentPartner = partnerRef.current;
+    // Priority: explicitly passed partner info > currently active call partner
+    const currentPartner = partnerId ? { id: partnerId, name: partnerName || 'User', username: partnerUsername } : partnerRef.current;
     if (!currentPartner) return;
 
     let plainText = '';
     if (type === 'MISSED') {
       plainText = isOwner ? 'Missed call' : `Missed call from ${currentPartner.name}`;
+    }
+    else if (type === 'BUSY') {
+      // The caller saves "Missed call" to the DB so the receiver sees it as a missed call,
+      // but we will show "User was busy" locally for the caller.
+      plainText = isOwner ? `Missed call` : `Missed call from ${currentPartner.name}`;
     }
     else if (type === 'NO_ANSWER') {
       plainText = isOwner ? 'No answer' : `Missed call from ${currentPartner.name}`;
@@ -61,7 +74,7 @@ function ChatLayout() {
     // Update Redux sidebar (optimistic for both sides)
     dispatch(updateChatLastMessage({
       chatId: String(currentPartner.id),
-      message: plainText,
+      message: type === 'BUSY' && isOwner ? `${currentPartner.name} was busy` : plainText,
       time: new Date().toISOString(),
       isMine: isOwner || false,
       sender: isOwner ? user : undefined,
@@ -73,11 +86,13 @@ function ChatLayout() {
       isForwarded: false
     }));
 
-    // ONLY the owner (caller) saves to DB
-    if (!isOwner) return;
-
+    // Save to DB
+    // We allow both sides to save if it's a missed/rejected call to ensure it persists for the person who didn't trigger it
+    // But for simplicity, let's stick to: Sender saves their outgoing, Receiver saves their incoming missed.
     try {
-      const rKey = await getPublicKeyApi(currentPartner.name); // Using name as username here
+      // Use the partner's username if available, fallback to name (historical/search name)
+      const targetUsername = currentPartner.username || currentPartner.name;
+      const rKey = await getPublicKeyApi(targetUsername); 
       const mKey = await getPublicKeyApi(user.username);
 
       let encryptedText = plainText;
@@ -98,7 +113,7 @@ function ChatLayout() {
     }
   }, [user, dispatch]);
 
-  const partnerRef = React.useRef<{ id: string; name: string; avatar?: string } | null>(null);
+  const partnerRef = React.useRef<{ id: string; name: string; username: string; avatar?: string } | null>(null);
 
   const {
     callState,
@@ -113,6 +128,7 @@ function ChatLayout() {
   } = useWebRTC({
     currentUserId: String(user?.id || ''),
     currentUserName: user?.name || user?.username || 'User',
+    currentUserUsername: user?.username || '',
     currentUserAvatar: user?.avatar,
     onIncomingCall: (data) => {
       console.log('Incoming call from:', data.fromName);
@@ -264,8 +280,26 @@ function ChatLayout() {
       }
     });
 
-      // Handle User Status (Online/Offline)
+      // Handle high-priority call log synchronization
       const socket = getSocket();
+      if (socket) {
+        socket.on('call:log_sync', (msg: any) => {
+          console.log('Syncing call log from server:', msg);
+          // We only update the sidebar here. The ChatWindow handles its own message history via local socket listener.
+          dispatch(updateChatLastMessage({
+            chatId: msg.senderId === String(user?.id) ? msg.receiverId : msg.senderId,
+            message: msg.sidebarText || msg.text,
+            time: msg.createdAt,
+            isMine: msg.senderId === String(user?.id),
+            sender: msg.sender,
+            lastMessageId: msg.id,
+            lastMessageSenderId: msg.senderId,
+            lastMessageType: msg.messageType
+          }));
+        });
+      }
+
+      // Handle User Status (Online/Offline)
       if (socket) {
         socket.on('userStatus', (data: { userId: number; isOnline: boolean; lastSeen?: string }) => {
           dispatch(setUserStatus({ 
@@ -374,7 +408,7 @@ function ChatLayout() {
         ) : selectedUser ? (
           <ChatWindow 
             chat={selectedUser} 
-            onStartAudioCall={(c) => startCall({ id: c.id, name: c.name, avatar: c.avatar })}
+            onStartAudioCall={(c) => startCall({ id: c.id, name: c.name, username: c.username, avatar: c.avatar })}
             onStartVideoCall={() => {}} 
             callState={callState}
             callPartner={callPartner}

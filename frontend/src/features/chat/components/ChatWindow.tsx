@@ -321,6 +321,20 @@ export function ChatWindow({
       if (!msg) return;
 
       // Handle events first
+      if (msg.type === 'call:log_sync') {
+        if (chat && (
+          (String(msg.senderId) === String(chat.id) && String(msg.receiverId) === String(me?.id)) ||
+          (String(msg.senderId) === String(me?.id) && String(msg.receiverId) === String(chat.id))
+        )) {
+          console.log('ChatWindow: Syncing call log:', msg);
+          setLocalMessages(prev => {
+            if (prev.some(m => String(m.id) === String(msg.id))) return prev;
+            return [...prev, msg];
+          });
+        }
+        return;
+      }
+
       if (msg.type === 'userBlockStatus') {
         if (chat && String(msg.blockerId) === String(chat.id)) {
           setIsBlocked(msg.isBlocked);

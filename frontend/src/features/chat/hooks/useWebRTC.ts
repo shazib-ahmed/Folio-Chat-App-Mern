@@ -1,19 +1,20 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { getSocket } from '@/shared/lib/socket';
 
-export type CallState = 'IDLE' | 'OFFERING' | 'RINGING' | 'CONNECTED' | 'REJECTED' | 'ENDED';
+export type CallState = 'IDLE' | 'OFFERING' | 'RINGING' | 'CONNECTED' | 'REJECTED' | 'ENDED' | 'BUSY';
 
 interface UseWebRTCProps {
   currentUserId: string;
   currentUserName: string;
+  currentUserUsername: string;
   currentUserAvatar?: string;
-  onIncomingCall?: (data: { from: string; fromName: string; fromAvatar?: string }) => void;
+  onIncomingCall?: (data: { from: string; fromName: string; fromUsername: string; fromAvatar?: string }) => void;
   onCallAccepted?: () => void;
   onCallEnded?: () => void;
-  onLogCall?: (type: 'MISSED' | 'REJECTED' | 'ENDED' | 'NO_ANSWER', duration?: number, logId?: string, isOwner?: boolean) => void;
+  onLogCall?: (type: 'MISSED' | 'REJECTED' | 'ENDED' | 'NO_ANSWER' | 'BUSY', duration?: number, logId?: string, isOwner?: boolean, partnerId?: string, partnerName?: string, partnerUsername?: string) => void;
 }
 
-export const useWebRTC = ({ currentUserId, currentUserName, currentUserAvatar, onIncomingCall, onCallAccepted, onCallEnded, onLogCall }: UseWebRTCProps) => {
+export const useWebRTC = ({ currentUserId, currentUserName, currentUserUsername, currentUserAvatar, onIncomingCall, onCallAccepted, onCallEnded, onLogCall }: UseWebRTCProps) => {
   const [callState, setCallState] = useState<CallState>('IDLE');
   const callStateRef = useRef<CallState>('IDLE');
 
@@ -25,7 +26,7 @@ export const useWebRTC = ({ currentUserId, currentUserName, currentUserAvatar, o
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
   const [isMuted, setIsMuted] = useState(false);
-  const [partner, setPartner] = useState<{ id: string; name: string; avatar?: string } | null>(null);
+  const [partner, setPartner] = useState<{ id: string; name: string; username: string; avatar?: string } | null>(null);
   
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
@@ -119,7 +120,7 @@ export const useWebRTC = ({ currentUserId, currentUserName, currentUserAvatar, o
     return pc;
   }, [currentUserId, cleanup, onCallEnded]);
 
-  const startCall = async (targetUser: { id: string; name: string; avatar?: string }) => {
+  const startCall = async (targetUser: { id: string; name: string; username: string; avatar?: string }) => {
     try {
       cleanup();
       isCallerRef.current = true;
@@ -137,7 +138,7 @@ export const useWebRTC = ({ currentUserId, currentUserName, currentUserAvatar, o
             logId,
             reason: 'timeout'
           });
-          onLogCall?.('NO_ANSWER', undefined, logId, true);
+          onLogCall?.('NO_ANSWER', undefined, logId, true, targetUser.id, targetUser.name, targetUser.username);
           cleanup();
           onCallEnded?.();
         }
@@ -157,6 +158,7 @@ export const useWebRTC = ({ currentUserId, currentUserName, currentUserAvatar, o
         to: Number(targetUser.id),
         from: Number(currentUserId),
         fromName: currentUserName, 
+        fromUsername: currentUserUsername,
         fromAvatar: currentUserAvatar,
         offer,
         type: 'audio',
@@ -217,14 +219,14 @@ export const useWebRTC = ({ currentUserId, currentUserName, currentUserAvatar, o
       // BOTH parties now log the call locally for instant feedback
       if (isCallerRef.current) {
         if (callStateRef.current === 'CONNECTED' && duration !== undefined) {
-          onLogCall?.('ENDED', duration, logId, true);
+          onLogCall?.('ENDED', duration, logId, true, partner.id, partner.name, partner.username);
         } else if (callStateRef.current === 'OFFERING' || callStateRef.current === 'RINGING') {
-          onLogCall?.('MISSED', undefined, logId, true);
+          onLogCall?.('MISSED', undefined, logId, true, partner.id, partner.name, partner.username);
         }
       } else {
         // If receiver ends a connected call
         if (callStateRef.current === 'CONNECTED' && duration !== undefined) {
-          onLogCall?.('ENDED', duration, logId, false);
+          onLogCall?.('ENDED', duration, logId, false, partner.id, partner.name, partner.username);
         }
       }
     }
@@ -241,7 +243,7 @@ export const useWebRTC = ({ currentUserId, currentUserName, currentUserAvatar, o
         logId
       });
       // Receiver logs the rejection optimistically, but NOT as owner (caller notified via socket will own it)
-      onLogCall?.('REJECTED', undefined, logId, false);
+      onLogCall?.('REJECTED', undefined, logId, false, partner.id, partner.name, partner.username);
     }
     cleanup();
   };
@@ -271,9 +273,30 @@ export const useWebRTC = ({ currentUserId, currentUserName, currentUserAvatar, o
     }, 500);
 
     const attachListeners = (s: any) => {
+      s.on('call:busy', (data: any) => {
+        // Update state to BUSY so UI can show the message
+        updateCallState('BUSY');
+        // Stop tones
+        stopTones();
+        // Auto-close busy state after 3 seconds
+        setTimeout(() => {
+          if (callStateRef.current === 'BUSY') {
+            cleanup();
+          }
+        }, 3000);
+      });
+
+      s.on('call:missed_busy', (data: any) => {
+        // Fallback UI update - the backend handles the DB save, 
+        // this ensures the sidebar updates even during a call.
+        console.log('UI: Received background missed call notification');
+        // No need to call onLogCall as backend already saved it, 
+        // but we could trigger a local refresh if needed.
+      });
+
       s.on('call:request', (data: any) => {
         isCallerRef.current = false;
-        setPartner({ id: data.from.toString(), name: data.fromName, avatar: data.fromAvatar });
+        setPartner({ id: data.from.toString(), name: data.fromName, username: data.fromUsername, avatar: data.fromAvatar });
         pendingOfferRef.current = data.offer;
         updateCallState('RINGING');
         ringtoneRef.current?.play().catch(e => console.log('Audio play failed:', e));
@@ -307,7 +330,7 @@ export const useWebRTC = ({ currentUserId, currentUserName, currentUserAvatar, o
 
       s.on('call:reject', (data: any) => {
         if (isCallerRef.current && (callStateRef.current === 'OFFERING' || callStateRef.current === 'RINGING')) {
-          onLogCall?.('REJECTED', undefined, data.logId, true);
+          onLogCall?.('REJECTED', undefined, data.logId, true, partner?.id, partner?.name, partner?.username);
         }
         cleanup();
       });
@@ -316,7 +339,7 @@ export const useWebRTC = ({ currentUserId, currentUserName, currentUserAvatar, o
         const duration = data.duration || (startTimeRef.current ? Math.floor((Date.now() - startTimeRef.current) / 1000) : 0);
         if (callStateRef.current === 'CONNECTED' || callStateRef.current === 'OFFERING' || callStateRef.current === 'RINGING') {
           const type = (callStateRef.current === 'CONNECTED') ? 'ENDED' : (data.reason === 'timeout' ? 'NO_ANSWER' : 'MISSED');
-          onLogCall?.(type, duration, data.logId, isCallerRef.current);
+          onLogCall?.(type, duration, data.logId, isCallerRef.current, partner?.id, partner?.name, partner?.username);
         }
         cleanup();
         onCallEnded?.();
@@ -331,6 +354,8 @@ export const useWebRTC = ({ currentUserId, currentUserName, currentUserAvatar, o
     return () => {
       clearInterval(checkInterval);
       if (socket) {
+        socket.off('call:busy');
+        socket.off('call:missed_busy');
         socket.off('call:request');
         socket.off('call:answer');
         socket.off('call:ice-candidate');
@@ -338,7 +363,7 @@ export const useWebRTC = ({ currentUserId, currentUserName, currentUserAvatar, o
         socket.off('call:end');
       }
     };
-  }, [currentUserId, createPeerConnection, cleanup, stopTones, onIncomingCall, onCallAccepted, onCallEnded, onLogCall, callState]);
+  }, [currentUserId, createPeerConnection, cleanup, stopTones, onIncomingCall, onCallAccepted, onCallEnded, onLogCall, callState, partner?.id, partner?.name, partner?.username]);
 
   return {
     callState,
