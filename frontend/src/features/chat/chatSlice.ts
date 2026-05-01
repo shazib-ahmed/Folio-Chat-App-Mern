@@ -50,7 +50,7 @@ const chatSlice = createSlice({
       isEncrypted?: boolean;
       lastMessageSenderId?: string;
       lastMessageId?: string;
-      lastMessageType?: 'TEXT' | 'IMAGE' | 'VIDEO' | 'AUDIO' | 'FILE';
+      lastMessageType?: 'TEXT' | 'IMAGE' | 'VIDEO' | 'AUDIO' | 'FILE' | 'CALL';
       isForwarded?: boolean;
     }>) => {
       const { chatId, message, time, isMine, sender, receiver, isEncrypted, lastMessageSenderId, lastMessageId, lastMessageType, isForwarded } = action.payload;

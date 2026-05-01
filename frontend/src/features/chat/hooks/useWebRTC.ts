@@ -42,12 +42,12 @@ export const useWebRTC = ({ currentUserId, currentUserName, currentUserAvatar, o
 
   useEffect(() => {
     // Calling tone (outgoing)
-    const calling = new Audio('https://assets.mixkit.co/active_storage/sfx/2358/2358-preview.mp3'); 
+    const calling = new Audio('https://assets.mixkit.co/active_storage/sfx/1351/1351-preview.mp3'); 
     calling.loop = true;
     callingToneRef.current = calling;
 
     // Ringtone (incoming)
-    const ring = new Audio('https://assets.mixkit.co/active_storage/sfx/1350/1350-preview.mp3'); 
+    const ring = new Audio('/reciever_rington.mp3'); 
     ring.loop = true;
     ringtoneRef.current = ring;
 

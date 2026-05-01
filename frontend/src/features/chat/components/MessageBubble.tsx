@@ -97,15 +97,15 @@ const VoiceMessage = React.memo(({ url, isMe }: { url: string; isMe?: boolean })
       </Button>
 
       <div className="flex-1 flex flex-col gap-1.5 min-w-0">
-        <div className="h-1.5 w-full bg-black/10 dark:bg-white/10 rounded-full overflow-hidden relative group cursor-pointer" 
-             onClick={(e) => {
-               if (audioRef.current) {
-                 const rect = e.currentTarget.getBoundingClientRect();
-                 const x = e.clientX - rect.left;
-                 const clickedValue = (x / rect.width) * audioRef.current.duration;
-                 audioRef.current.currentTime = clickedValue;
-               }
-             }}>
+        <div className="h-1.5 w-full bg-black/10 dark:bg-white/10 rounded-full overflow-hidden relative group cursor-pointer"
+          onClick={(e) => {
+            if (audioRef.current) {
+              const rect = e.currentTarget.getBoundingClientRect();
+              const x = e.clientX - rect.left;
+              const clickedValue = (x / rect.width) * audioRef.current.duration;
+              audioRef.current.currentTime = clickedValue;
+            }
+          }}>
           <div
             className={cn("h-full transition-all duration-100", isMe ? "bg-white" : "bg-primary")}
             style={{ width: `${progress}%` }}
@@ -355,258 +355,258 @@ export const MessageBubble = React.memo(({ message, isMe, onEdit, onDelete, onFo
             ))}
           </div>
         )}
-      <div className={cn(
-        "w-fit px-4 py-2.5 rounded-2xl text-sm relative shadow-sm transition-all duration-200",
-        isDeleting && "opacity-70 grayscale",
-        message.isDeleted
-          ? "bg-red-500/5 text-red-500/80 italic border border-red-500/20 shadow-none"
-          : (isMe
-            ? "bg-[hsl(var(--bubble-me))] text-primary-foreground rounded-tr-none"
-            : "bg-[hsl(var(--bubble-other))] text-foreground rounded-tl-none border border-border/40")
-      )}>
-        {/* Deleted Message Placeholder */}
-        {message.isDeleted ? (
-          <div className="flex items-center gap-2 py-1 min-w-[200px]">
-            <FontAwesomeIcon icon={faTrash} className="h-3 w-3 text-red-500/40" />
-            <span className="text-[11px] font-medium">
-              {message.isForwarded
-                ? "Content unavailable"
-                : (isMe ? "You deleted a message" : `${otherName || 'User'} deleted a message`)}
-            </span>
-            {isDeleting && (
-              <div className="w-3 h-3 border-2 border-primary/30 border-t-primary rounded-full animate-spin ml-auto" />
-            )}
-          </div>
-        ) : (
-          <>
-            {/* Reply Quote */}
-            {message.replyTo && (
-              <div
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onScrollTo?.(message.replyTo!.id);
-                }}
-                className={cn(
-                  "mb-2 p-2 rounded-md border-l-4 bg-black/5 dark:bg-white/5 cursor-pointer hover:bg-black/10 dark:hover:bg-white/10 transition-colors",
-                  isMe ? "border-white/40" : "border-primary/40"
-                )}
-              >
-                <p className={cn(
-                  "text-[10px] font-bold mb-0.5",
-                  isMe ? "text-white/80" : "text-primary/80"
-                )}>
-                  {String(message.replyTo.senderId) === String(me?.id) ? "You" : (otherName || "User")}
-                </p>
-                <p className="text-xs truncate opacity-70 italic line-clamp-1">
-                  {decryptedReplyText || (message.replyTo.isEncrypted && !decryptedReplyText ? "🔒 Encrypted Message" : (message.replyTo.text || "Attachment"))}
-                </p>
-              </div>
-            )}
-            {isDeleting && (
-              <div className="absolute inset-0 bg-background/40 backdrop-blur-[1px] z-[60] flex items-center justify-center rounded-lg">
-                <div className="w-5 h-5 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
-              </div>
-            )}
-            {/* Triangle Tail */}
-            <div className={cn(
-              "absolute top-0 w-3 h-3",
-              isMe
-                ? "right-[-8px] text-[hsl(var(--bubble-me))]"
-                : "left-[-8px] text-[hsl(var(--bubble-other))]"
-            )}>
-              <svg viewBox="0 0 8 13" preserveAspectRatio="none" className="w-full h-full fill-current">
-                <path d={isMe ? "M0 0 L8 0 L0 13 Z" : "M8 0 L0 0 L8 13 Z"} />
-              </svg>
-            </div>
-
-            {/* Forwarded Label */}
-            {message.isForwarded && (
-              <div className="flex items-center gap-1.5 mb-1.5 opacity-60">
-                <FontAwesomeIcon icon={faShare} className="text-[10px]" />
-                <span className="text-[10px] italic font-medium">Forwarded</span>
-              </div>
-            )}
-
-            {/* Media Attachments */}
-            {message.messageType === 'IMAGE' && (
-              <div className="mb-2 rounded overflow-hidden max-w-[320px] relative min-h-[100px] w-full">
-                {activeUrl ? (
-                  <img
-                    src={activeUrl}
-                    alt="Sent"
-                    className="w-full h-auto max-h-[400px] object-cover cursor-pointer hover:opacity-95 transition-opacity min-w-[200px]"
-                    onClick={() => setIsImageModalOpen(true)}
-                  />
-                ) : showLoading ? (
-                  <div className="w-[240px] h-[200px] bg-black/5 dark:bg-white/5 flex flex-col items-center justify-center gap-2 relative">
-                    <Skeleton className="w-full h-full absolute inset-0" />
-                    <div className="relative z-10">
-                      <div className="w-5 h-5 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
-                    </div>
-                  </div>
-                ) : null}
-              </div>
-            )}
-
-            {isImageModalOpen && (
-              <div
-                className="fixed inset-0 z-[9999] bg-black/90 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-300"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setIsImageModalOpen(false);
-                }}
-              >
-                <div className="relative max-w-[90vw] max-h-[90vh] flex items-center justify-center">
-                  <img
-                    src={activeUrl || undefined}
-                    alt="Full view"
-                    className="max-w-full max-h-[90vh] object-contain rounded-lg shadow-2xl animate-in zoom-in duration-300"
-                    onClick={(e) => e.stopPropagation()}
-                  />
-                  <button
-                    className="absolute top-[-50px] right-0 md:right-[-50px] md:top-0 text-white hover:text-primary transition-colors text-2xl p-2 h-12 w-12 flex items-center justify-center bg-white/10 hover:bg-white/20 rounded-full"
-                    onClick={() => setIsImageModalOpen(false)}
-                  >
-                    <FontAwesomeIcon icon={faXmark} />
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {message.messageType === 'VIDEO' && (
-              <div className="mb-2 rounded overflow-hidden max-w-[320px] relative">
-                {activeUrl ? (
-                  <video
-                    src={activeUrl}
-                    controls
-                    className="w-full aspect-video rounded"
-                  />
-                ) : showLoading ? (
-                  <Skeleton className="w-full aspect-video" />
-                ) : null}
-              </div>
-            )}
-
-            {message.messageType === 'AUDIO' && (
-              <div className="relative">
-                {activeUrl ? (
-                  <VoiceMessage url={activeUrl} isMe={isMe} />
-                ) : showLoading ? (
-                  <div className="flex items-center gap-3 py-1 min-w-[220px]">
-                    <Skeleton className="h-10 w-10 rounded-full" />
-                    <div className="flex-1 space-y-2">
-                      <Skeleton className="h-1.5 w-full rounded-full" />
-                      <Skeleton className="h-2 w-20 rounded-full" />
-                    </div>
-                  </div>
-                ) : null}
-              </div>
-            )}
-
-            {message.messageType === 'FILE' && (
-              <div className="mb-2 min-w-[240px]">
-                <div
-                  onClick={(e) => !showLoading && activeUrl && handleDownload(e, activeUrl, activeFileName || 'file')}
-                  className={cn(
-                    "flex items-center gap-3 p-2 bg-black/5 dark:bg-white/5 rounded border border-black/10 dark:border-white/10 group transition-colors cursor-pointer",
-                    (!showLoading && activeUrl) && "hover:bg-black/10 dark:hover:bg-white/10"
-                  )}
-                >
-                  <div className="w-9 h-9 bg-primary/20 rounded flex items-center justify-center shrink-0">
-                    {showLoading && !activeUrl ? (
-                      <div className="w-4 h-4 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
-                    ) : (
-                      <FontAwesomeIcon icon={faFileLines} className="text-primary text-lg" />
-                    )}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-[11px] font-semibold truncate">{activeFileName || 'Attachment'}</p>
-                    <p className="text-[9px] opacity-60">
-                      {activeFileSize || 'Click to view/download'}
-                    </p>
-                  </div>
-                  {!showLoading && activeUrl && (
-                    <FontAwesomeIcon icon={faDownload} className="text-[10px] opacity-40 group-hover:opacity-100 transition-opacity" />
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* Call Logs */}
-            {message.messageType === 'CALL' && (
-              <div className="flex items-center gap-3 py-2 px-1 min-w-[180px]">
-                <div className={cn(
-                  "w-9 h-9 rounded-full flex items-center justify-center shrink-0 shadow-sm",
-                  activeText?.toLowerCase().includes('missed') || activeText?.toLowerCase().includes('declined') 
-                    ? "bg-red-500/20 text-red-500" 
-                    : "bg-green-500/20 text-green-500"
-                )}>
-                  <FontAwesomeIcon icon={faPhone} className="text-sm" />
-                </div>
-                <div className="flex-1 min-w-0 pr-1">
-                  <p className="text-[12px] font-bold truncate leading-tight mb-0.5">
-                    {activeText?.toLowerCase().includes('missed') || activeText?.toLowerCase().includes('no answer')
-                      ? (isMe 
-                          ? (activeText?.toLowerCase().includes('no answer') ? 'No answer' : 'You made a missed call') 
-                          : `You have a missed call from ${otherName || 'User'}`) 
-                      : (activeText?.toLowerCase().includes('declined') 
-                          ? (isMe ? 'You declined the call' : 'Call was declined')
-                          : activeText || 'Audio call')}
-                  </p>
-                  <p className="text-[10px] opacity-70 font-semibold tracking-wide uppercase">
-                    {(activeText?.toLowerCase().includes('missed') || activeText?.toLowerCase().includes('no answer')) 
-                      ? 'Missed Call' 
-                      : (activeText?.toLowerCase().includes('declined') ? 'Declined Call' : 'Voice Call')}
-                  </p>
-                </div>
-              </div>
-            )}
-
-            {/* Message Text / Caption */}
-            {message.messageType !== 'CALL' && (
-              <p className="leading-relaxed break-words whitespace-pre-wrap">
-                {activeText || message.text || (message as any).message || (message as any).content || ""}
-              </p>
-            )}
-            <div className="flex items-center justify-end gap-1.5 mt-1 select-none">
-              {message.isEdited && <span className="text-[9px] opacity-40 font-medium italic">Edited</span>}
-              <span className="text-[10px] opacity-60 font-medium">
-                {message.timestamp}
+        <div className={cn(
+          "w-fit px-4 py-2.5 rounded-2xl text-sm relative shadow-sm transition-all duration-200",
+          isDeleting && "opacity-70 grayscale",
+          message.isDeleted
+            ? "bg-red-500/5 text-red-500/80 italic border border-red-500/20 shadow-none"
+            : (isMe
+              ? "bg-[hsl(var(--bubble-me))] text-primary-foreground rounded-tr-none"
+              : "bg-[hsl(var(--bubble-other))] text-foreground rounded-tl-none border border-border/40")
+        )}>
+          {/* Deleted Message Placeholder */}
+          {message.isDeleted ? (
+            <div className="flex items-center gap-2 py-1 min-w-[200px]">
+              <FontAwesomeIcon icon={faTrash} className="h-3 w-3 text-red-500/40" />
+              <span className="text-[11px] font-medium">
+                {message.isForwarded
+                  ? "Content unavailable"
+                  : (isMe ? "You deleted a message" : `${otherName || 'User'} deleted a message`)}
               </span>
-              {isMe && (
-                <div className="flex items-center">
-                  {message.status === 'pending' ? (
-                    <FontAwesomeIcon icon={faClock} className="h-2.5 w-2.5 opacity-40" />
-                  ) : message.status === 'SEEN' ? (
-                    <FontAwesomeIcon icon={faCheckDouble} className="h-3 w-3 text-[#10ff00] dark:text-[#152a34]" />
-                  ) : (
-                    <FontAwesomeIcon icon={faCheckDouble} className="h-3 w-3 opacity-40" />
-                  )}
-                </div>
+              {isDeleting && (
+                <div className="w-3 h-3 border-2 border-primary/30 border-t-primary rounded-full animate-spin ml-auto" />
               )}
             </div>
-          </>
-        )}
+          ) : (
+            <>
+              {/* Reply Quote */}
+              {message.replyTo && (
+                <div
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onScrollTo?.(message.replyTo!.id);
+                  }}
+                  className={cn(
+                    "mb-2 p-2 rounded-md border-l-4 bg-black/5 dark:bg-white/5 cursor-pointer hover:bg-black/10 dark:hover:bg-white/10 transition-colors",
+                    isMe ? "border-white/40" : "border-primary/40"
+                  )}
+                >
+                  <p className={cn(
+                    "text-[10px] font-bold mb-0.5",
+                    isMe ? "text-white/80" : "text-primary/80"
+                  )}>
+                    {String(message.replyTo.senderId) === String(me?.id) ? "You" : (otherName || "User")}
+                  </p>
+                  <p className="text-xs truncate opacity-70 italic line-clamp-1">
+                    {decryptedReplyText || (message.replyTo.isEncrypted && !decryptedReplyText ? "🔒 Encrypted Message" : (message.replyTo.text || "Attachment"))}
+                  </p>
+                </div>
+              )}
+              {isDeleting && (
+                <div className="absolute inset-0 bg-background/40 backdrop-blur-[1px] z-[60] flex items-center justify-center rounded-lg">
+                  <div className="w-5 h-5 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
+                </div>
+              )}
+              {/* Triangle Tail */}
+              <div className={cn(
+                "absolute top-0 w-3 h-3",
+                isMe
+                  ? "right-[-8px] text-[hsl(var(--bubble-me))]"
+                  : "left-[-8px] text-[hsl(var(--bubble-other))]"
+              )}>
+                <svg viewBox="0 0 8 13" preserveAspectRatio="none" className="w-full h-full fill-current">
+                  <path d={isMe ? "M0 0 L8 0 L0 13 Z" : "M8 0 L0 0 L8 13 Z"} />
+                </svg>
+              </div>
 
-        {/* Reaction Summary Badge */}
-        {message.reactions && message.reactions.length > 0 && (
-          <div className={cn(
-            "absolute -bottom-3 flex items-center gap-1 bg-background/95 backdrop-blur-md border border-border/40 px-1.5 py-0.5 rounded-full shadow-sm cursor-pointer hover:bg-accent transition-colors z-[65]",
-            isMe ? "right-2" : "left-2"
-          )}>
-            <div className="flex -space-x-1 overflow-hidden">
-              {Array.from(new Set(message.reactions.map(r => r.emoji))).slice(0, 3).map(emoji => (
-                <span key={emoji} className="text-[12px] leading-none drop-shadow-sm">{emoji}</span>
-              ))}
+              {/* Forwarded Label */}
+              {message.isForwarded && (
+                <div className="flex items-center gap-1.5 mb-1.5 opacity-60">
+                  <FontAwesomeIcon icon={faShare} className="text-[10px]" />
+                  <span className="text-[10px] italic font-medium">Forwarded</span>
+                </div>
+              )}
+
+              {/* Media Attachments */}
+              {message.messageType === 'IMAGE' && (
+                <div className="mb-2 rounded overflow-hidden max-w-[320px] relative min-h-[100px] w-full">
+                  {activeUrl ? (
+                    <img
+                      src={activeUrl}
+                      alt="Sent"
+                      className="w-full h-auto max-h-[400px] object-cover cursor-pointer hover:opacity-95 transition-opacity min-w-[200px]"
+                      onClick={() => setIsImageModalOpen(true)}
+                    />
+                  ) : showLoading ? (
+                    <div className="w-[240px] h-[200px] bg-black/5 dark:bg-white/5 flex flex-col items-center justify-center gap-2 relative">
+                      <Skeleton className="w-full h-full absolute inset-0" />
+                      <div className="relative z-10">
+                        <div className="w-5 h-5 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              )}
+
+              {isImageModalOpen && (
+                <div
+                  className="fixed inset-0 z-[9999] bg-black/90 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-300"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setIsImageModalOpen(false);
+                  }}
+                >
+                  <div className="relative max-w-[90vw] max-h-[90vh] flex items-center justify-center">
+                    <img
+                      src={activeUrl || undefined}
+                      alt="Full view"
+                      className="max-w-full max-h-[90vh] object-contain rounded-lg shadow-2xl animate-in zoom-in duration-300"
+                      onClick={(e) => e.stopPropagation()}
+                    />
+                    <button
+                      className="absolute top-[-50px] right-0 md:right-[-50px] md:top-0 text-white hover:text-primary transition-colors text-2xl p-2 h-12 w-12 flex items-center justify-center bg-white/10 hover:bg-white/20 rounded-full"
+                      onClick={() => setIsImageModalOpen(false)}
+                    >
+                      <FontAwesomeIcon icon={faXmark} />
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {message.messageType === 'VIDEO' && (
+                <div className="mb-2 rounded overflow-hidden max-w-[320px] relative">
+                  {activeUrl ? (
+                    <video
+                      src={activeUrl}
+                      controls
+                      className="w-full aspect-video rounded"
+                    />
+                  ) : showLoading ? (
+                    <Skeleton className="w-full aspect-video" />
+                  ) : null}
+                </div>
+              )}
+
+              {message.messageType === 'AUDIO' && (
+                <div className="relative">
+                  {activeUrl ? (
+                    <VoiceMessage url={activeUrl} isMe={isMe} />
+                  ) : showLoading ? (
+                    <div className="flex items-center gap-3 py-1 min-w-[220px]">
+                      <Skeleton className="h-10 w-10 rounded-full" />
+                      <div className="flex-1 space-y-2">
+                        <Skeleton className="h-1.5 w-full rounded-full" />
+                        <Skeleton className="h-2 w-20 rounded-full" />
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              )}
+
+              {message.messageType === 'FILE' && (
+                <div className="mb-2 min-w-[240px]">
+                  <div
+                    onClick={(e) => !showLoading && activeUrl && handleDownload(e, activeUrl, activeFileName || 'file')}
+                    className={cn(
+                      "flex items-center gap-3 p-2 bg-black/5 dark:bg-white/5 rounded border border-black/10 dark:border-white/10 group transition-colors cursor-pointer",
+                      (!showLoading && activeUrl) && "hover:bg-black/10 dark:hover:bg-white/10"
+                    )}
+                  >
+                    <div className="w-9 h-9 bg-primary/20 rounded flex items-center justify-center shrink-0">
+                      {showLoading && !activeUrl ? (
+                        <div className="w-4 h-4 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
+                      ) : (
+                        <FontAwesomeIcon icon={faFileLines} className="text-primary text-lg" />
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[11px] font-semibold truncate">{activeFileName || 'Attachment'}</p>
+                      <p className="text-[9px] opacity-60">
+                        {activeFileSize || 'Click to view/download'}
+                      </p>
+                    </div>
+                    {!showLoading && activeUrl && (
+                      <FontAwesomeIcon icon={faDownload} className="text-[10px] opacity-40 group-hover:opacity-100 transition-opacity" />
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Call Logs */}
+              {message.messageType === 'CALL' && (
+                <div className="flex items-center gap-3 py-2 px-1 min-w-[180px]">
+                  <div className={cn(
+                    "w-9 h-9 rounded-full flex items-center justify-center shrink-0 shadow-sm",
+                    activeText?.toLowerCase().includes('missed') || activeText?.toLowerCase().includes('declined')
+                      ? "bg-red-500/20 text-red-500"
+                      : "bg-green-500/20 text-green-500"
+                  )}>
+                    <FontAwesomeIcon icon={faPhone} className="text-sm" />
+                  </div>
+                  <div className="flex-1 min-w-0 pr-1">
+                    <p className="text-[12px] font-bold truncate leading-tight mb-0.5">
+                      {activeText?.toLowerCase().includes('missed') || activeText?.toLowerCase().includes('no answer')
+                        ? (isMe
+                          ? (activeText?.toLowerCase().includes('no answer') ? 'No answer' : 'You made a missed call')
+                          : `You have a missed call from ${otherName || 'User'}`)
+                        : (activeText?.toLowerCase().includes('declined')
+                          ? (isMe ? `${otherName || 'User'} declined the call` : 'You declined the call')
+                          : activeText || 'Audio call')}
+                    </p>
+                    <p className="text-[10px] opacity-70 font-semibold tracking-wide uppercase">
+                      {(activeText?.toLowerCase().includes('missed') || activeText?.toLowerCase().includes('no answer'))
+                        ? 'Missed Call'
+                        : (activeText?.toLowerCase().includes('declined') ? 'Declined Call' : 'Voice Call')}
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {/* Message Text / Caption */}
+              {message.messageType !== 'CALL' && (
+                <p className="leading-relaxed break-words whitespace-pre-wrap">
+                  {activeText || message.text || (message as any).message || (message as any).content || ""}
+                </p>
+              )}
+              <div className="flex items-center justify-end gap-1.5 mt-1 select-none">
+                {message.isEdited && <span className="text-[9px] opacity-40 font-medium italic">Edited</span>}
+                <span className="text-[10px] opacity-60 font-medium">
+                  {message.timestamp}
+                </span>
+                {isMe && (
+                  <div className="flex items-center">
+                    {message.status === 'pending' ? (
+                      <FontAwesomeIcon icon={faClock} className="h-2.5 w-2.5 opacity-40" />
+                    ) : message.status === 'SEEN' ? (
+                      <FontAwesomeIcon icon={faCheckDouble} className="h-3 w-3 text-[#10ff00] dark:text-[#152a34]" />
+                    ) : (
+                      <FontAwesomeIcon icon={faCheckDouble} className="h-3 w-3 opacity-40" />
+                    )}
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+
+          {/* Reaction Summary Badge */}
+          {message.reactions && message.reactions.length > 0 && (
+            <div className={cn(
+              "absolute -bottom-3 flex items-center gap-1 bg-background/95 backdrop-blur-md border border-border/40 px-1.5 py-0.5 rounded-full shadow-sm cursor-pointer hover:bg-accent transition-colors z-[65]",
+              isMe ? "right-2" : "left-2"
+            )}>
+              <div className="flex -space-x-1 overflow-hidden">
+                {Array.from(new Set(message.reactions.map(r => r.emoji))).slice(0, 3).map(emoji => (
+                  <span key={emoji} className="text-[12px] leading-none drop-shadow-sm">{emoji}</span>
+                ))}
+              </div>
+              {message.reactions.length > 1 && (
+                <span className="text-[10px] font-bold text-muted-foreground ml-0.5">
+                  {message.reactions.length}
+                </span>
+              )}
             </div>
-            {message.reactions.length > 1 && (
-              <span className="text-[10px] font-bold text-muted-foreground ml-0.5">
-                {message.reactions.length}
-              </span>
-            )}
-          </div>
-        )}
-      </div>
+          )}
+        </div>
       </div>
 
       {!message.isDeleted && onEdit && (

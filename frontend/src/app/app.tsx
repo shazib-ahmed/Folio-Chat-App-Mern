@@ -2,8 +2,6 @@ import React from 'react';
 import { BrowserRouter as Router, Routes, Route, useParams, useLocation, useNavigate } from 'react-router-dom';
 import { ChatSidebar } from '@/features/chat/components/ChatSidebar';
 import { ChatWindow } from '@/features/chat/components/ChatWindow';
-import { AudioCallWindow } from '@/features/chat/components/AudioCallWindow';
-import { VideoCallWindow } from '@/features/chat/components/VideoCallWindow';
 import { AuthPage } from '@/features/auth/pages/AuthPage';
 import { ProfileSettings } from '@/features/settings/components/ProfileSettings';
 import { CredentialsSettings } from '@/features/settings/components/CredentialsSettings';
@@ -19,8 +17,10 @@ import { useDispatch, useSelector } from 'react-redux';
 import { RootState, AppDispatch } from '@/app/store';
 import { initiateSocketConnection, disconnectSocket, subscribeToMessages, getSocket } from '@/shared/lib/socket';
 import { fetchChatList, updateChatLastMessage, setTypingStatus, setUserStatus, updateChatStatus, updateChatPreview } from '@/features/chat/chatSlice';
-import { getUserByUsernameApi, setPublicKeyApi, getPublicKeyApi } from '@/features/chat/chatService';
-import { generateE2EEKeys, saveKeys, exportPublicKey, getLocalKeys } from '@/shared/lib/cryptoUtils';
+import { getUserByUsernameApi, setPublicKeyApi, getPublicKeyApi, sendMessageApi } from '@/features/chat/chatService';
+import { generateE2EEKeys, saveKeys, exportPublicKey, getLocalKeys, encryptForBoth } from '@/shared/lib/cryptoUtils';
+import { useWebRTC } from '@/features/chat/hooks/useWebRTC';
+import { CallOverlay } from '@/features/chat/components/CallOverlay';
 
 function ChatLayout() {
   const { chatId } = useParams<{ chatId: string }>(); // This is now a username
@@ -29,9 +29,113 @@ function ChatLayout() {
   const dispatch = useDispatch<AppDispatch>();
   const { user } = useSelector((state: RootState) => state.auth);
   const { chats } = useSelector((state: RootState) => state.chat);
-  const [activeAudioCall, setActiveAudioCall] = React.useState<Chat | null>(null);
-  const [activeVideoCall, setActiveVideoCall] = React.useState<Chat | null>(null);
   const [selectedUser, setSelectedUser] = React.useState<Chat | undefined>(undefined);
+
+  // Global Call Logging Handler
+  const onLogCallGlobal = React.useCallback(async (type: 'MISSED' | 'REJECTED' | 'ENDED' | 'NO_ANSWER', duration?: number, providedLogId?: string, isOwner?: boolean) => {
+    if (!user) return;
+    
+    // Determine which chat this log belongs to
+    // If we are currently in a call, we have a partner
+    const currentPartner = partnerRef.current;
+    if (!currentPartner) return;
+
+    let plainText = '';
+    if (type === 'MISSED' || type === 'NO_ANSWER') {
+      plainText = isOwner ? 'No answer' : `Missed call from ${currentPartner.name}`;
+    }
+    else if (type === 'REJECTED') {
+      plainText = isOwner ? `${currentPartner.name} declined` : 'You declined the call';
+    }
+    else if (type === 'ENDED') {
+      const mins = Math.floor((duration || 0) / 60);
+      const secs = (duration || 0) % 60;
+      plainText = `Audio call (${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')})`;
+    }
+
+    const clientMsgId = providedLogId || `log-${Date.now()}`;
+
+    // Update Redux sidebar (optimistic for both sides)
+    dispatch(updateChatLastMessage({
+      chatId: String(currentPartner.id),
+      message: plainText,
+      time: new Date().toISOString(),
+      isMine: isOwner || false,
+      sender: isOwner ? user : undefined,
+      receiver: !isOwner ? user : undefined,
+      isEncrypted: true,
+      lastMessageSenderId: isOwner ? String(user.id) : String(currentPartner.id),
+      lastMessageId: clientMsgId,
+      lastMessageType: 'CALL',
+      isForwarded: false
+    }));
+
+    // ONLY the owner (caller) saves to DB
+    if (!isOwner) return;
+
+    try {
+      const rKey = await getPublicKeyApi(currentPartner.name); // Using name as username here
+      const mKey = await getPublicKeyApi(user.username);
+
+      let encryptedText = plainText;
+      if (rKey && mKey) {
+        encryptedText = await encryptForBoth(plainText, rKey, mKey);
+      }
+
+      await sendMessageApi(
+        currentPartner.id,
+        encryptedText,
+        'CALL',
+        undefined,
+        !!(rKey && mKey),
+        clientMsgId
+      );
+    } catch (err) {
+      console.error('Failed to log call globally:', err);
+    }
+  }, [user, dispatch]);
+
+  const partnerRef = React.useRef<{ id: string; name: string; avatar?: string } | null>(null);
+
+  const {
+    callState,
+    remoteStream,
+    isMuted,
+    partner: callPartner,
+    startCall,
+    acceptCall,
+    rejectCall,
+    endCall,
+    toggleMute
+  } = useWebRTC({
+    currentUserId: String(user?.id || ''),
+    currentUserName: user?.name || user?.username || 'User',
+    currentUserAvatar: user?.avatar,
+    onIncomingCall: (data) => {
+      console.log('Incoming call from:', data.fromName);
+    },
+    onCallAccepted: () => {
+      console.log('Call accepted');
+    },
+    onCallEnded: () => {
+      console.log('Call ended');
+    },
+    onLogCall: onLogCallGlobal
+  });
+
+  React.useEffect(() => {
+    partnerRef.current = callPartner;
+  }, [callPartner]);
+
+  // Attach remote stream to audio element
+  React.useEffect(() => {
+    if (remoteStream) {
+      const audioEl = document.getElementById('remoteAudio') as HTMLAudioElement;
+      if (audioEl) {
+        audioEl.srcObject = remoteStream;
+      }
+    }
+  }, [remoteStream]);
   
   React.useEffect(() => {
     if (user?.id) {
@@ -108,7 +212,21 @@ function ChatLayout() {
 				const sidebarChatId = isMine ? msg.receiverId : msg.senderId;
 
 				if (sidebarChatId) {
-					const displayMessage = (msg.isEncrypted && msg.text) ? msg.text : (msg.sidebarText || msg.text || '');
+					let displayMessage = (msg.isEncrypted && msg.text) ? msg.text : (msg.sidebarText || msg.text || '');
+					
+					// Special handling for CALL messages to show friendly sidebar text
+					if (msg.messageType === 'CALL') {
+						const isReceiver = String(msg.receiverId) === String(user.id);
+						const lowerText = msg.text?.toLowerCase() || '';
+						
+						if (lowerText.includes('missed') || lowerText.includes('no answer')) {
+							displayMessage = isReceiver ? `Missed call from ${msg.sender?.name || 'User'}` : 'No answer';
+						} else if (lowerText.includes('declined')) {
+							displayMessage = isReceiver ? 'You declined the call' : `${msg.receiver?.name || 'User'} declined`;
+						} else {
+							displayMessage = msg.text || 'Audio call';
+						}
+					}
 					
 					dispatch(updateChatLastMessage({
 						chatId: String(sidebarChatId),
@@ -251,8 +369,15 @@ function ChatLayout() {
         ) : selectedUser ? (
           <ChatWindow 
             chat={selectedUser} 
-            onStartAudioCall={setActiveAudioCall}
-            onStartVideoCall={setActiveVideoCall}
+            onStartAudioCall={(c) => startCall({ id: c.id, name: c.name, avatar: c.avatar })}
+            onStartVideoCall={() => {}} 
+            callState={callState}
+            callPartner={callPartner}
+            isMuted={isMuted}
+            acceptCall={acceptCall}
+            rejectCall={rejectCall}
+            endCall={endCall}
+            toggleMute={toggleMute}
           />
         ) : (
           <div className="flex-1 flex flex-col items-center justify-center text-muted-foreground p-8 text-center bg-accent/5">
@@ -267,18 +392,15 @@ function ChatLayout() {
         )}
       </div>
 
-      {activeAudioCall && (
-        <AudioCallWindow 
-          chat={activeAudioCall} 
-          onClose={() => setActiveAudioCall(null)} 
-        />
-      )}
-      {activeVideoCall && (
-        <VideoCallWindow 
-          chat={activeVideoCall} 
-          onClose={() => setActiveVideoCall(null)} 
-        />
-      )}
+      <CallOverlay
+        state={callState as any}
+        partner={callPartner}
+        isMuted={isMuted}
+        onAccept={acceptCall}
+        onReject={rejectCall}
+        onEnd={endCall}
+        onToggleMute={toggleMute}
+      />
     </div>
   );
 }
