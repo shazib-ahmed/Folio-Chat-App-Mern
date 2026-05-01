@@ -2,12 +2,17 @@ const path = require('path');
 const webpack = require('webpack');
 const dotenv = require('dotenv');
 
-// Load environment variables from .env file
-const env = dotenv.config().parsed || {};
+// Load environment variables from .env file AND process.env (for CI/CD like Vercel)
+const envFile = dotenv.config().parsed || {};
+const env = { ...process.env, ...envFile };
 
-// Format the environment variables for DefinePlugin
-const envKeys = Object.keys(env).reduce((prev, next) => {
-  prev[`process.env.${next}`] = JSON.stringify(env[next]);
+// Define which keys we want to inject (to avoid injecting sensitive system env vars)
+const keysToInject = ['API_URL', 'APP_SOCKET_URL', 'APP_ENCRYPTION_KEY'];
+
+const envKeys = keysToInject.reduce((prev, next) => {
+  if (env[next]) {
+    prev[`process.env.${next}`] = JSON.stringify(env[next]);
+  }
   return prev;
 }, {});
 
