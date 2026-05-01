@@ -444,11 +444,11 @@ function ChatLayout() {
 
   // Dynamic Browser Title
   const pageTitle = React.useMemo(() => {
-    if (selectedUser) return `${selectedUser.name || selectedUser.username} | Folio Messenger`;
-    if (pathname === '/profile') return `Profile | Folio Messenger`;
-    if (pathname === '/credentials') return `Account & Security | Folio Messenger`;
-    if (pathname === '/settings') return `Settings | Folio Messenger`;
-    return 'Folio Messenger';
+    if (selectedUser) return `${selectedUser.name || selectedUser.username} | Folio-Messenger`;
+    if (pathname === '/profile') return `Profile | Folio-Messenger`;
+    if (pathname === '/credentials') return `Account & Security | Folio-Messenger`;
+    if (pathname === '/settings') return `Settings | Folio-Messenger`;
+    return 'Folio-Messenger';
   }, [selectedUser, pathname]);
 
   usePageTitle(pageTitle);
@@ -521,7 +521,7 @@ function ChatLayout() {
                   <path d="M12 2C6.477 2 2 6.477 2 12c0 1.891.527 3.657 1.442 5.16L2 22l4.84-1.442A9.957 9.957 0 0012 22c5.523 0 10-4.477 10-10S17.523 2 12 2zm0 18c-1.63 0-3.146-.483-4.42-1.313l-3.125.933.933-3.125A7.957 7.957 0 014 12c0-4.411 3.589-8 8-8s8 3.589 8 8-3.589 8-8 8z" />
                </svg>
             </div>
-            <h2 className="text-2xl font-semibold text-foreground mb-2">Folio Messenger</h2>
+            <h2 className="text-2xl font-semibold text-foreground mb-2">Folio-Messenger</h2>
             <p className="max-w-md">Select a conversation or start a new one to begin messaging. Your messages are end-to-end encrypted.</p>
           </div>
         )}

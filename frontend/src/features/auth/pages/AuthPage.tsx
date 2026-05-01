@@ -14,7 +14,7 @@ export function AuthPage({ initialIsLogin = true }: { initialIsLogin?: boolean }
     setIsLogin(pathname === '/login');
   }, [pathname]);
 
-  usePageTitle(isLogin ? "Login | Folio Chat" : "Sign Up | Folio Chat");
+  usePageTitle(isLogin ? "Login | Folio-Messenger" : "Sign Up | Folio-Messenger");
 
   return (
     <div className="min-h-screen w-full flex items-center justify-center bg-background relative overflow-hidden p-4">
@@ -38,7 +38,7 @@ export function AuthPage({ initialIsLogin = true }: { initialIsLogin?: boolean }
 
         <div className="text-center">
           <p className="text-xs text-muted-foreground opacity-50">
-            &copy; {new Date().getFullYear()} Folio Chat App. All rights reserved.
+            &copy; {new Date().getFullYear()} Folio-Messenger. All rights reserved.
           </p>
         </div>
       </div>
