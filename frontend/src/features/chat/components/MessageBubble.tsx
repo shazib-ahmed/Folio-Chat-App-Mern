@@ -610,10 +610,7 @@ export const MessageBubble = React.memo(({ message, isMe, onEdit, onDelete, onFo
       </div>
 
       {!message.isDeleted && onEdit && (
-        <div className={cn(
-          "flex flex-col items-center justify-center gap-1 px-1 transition-all self-center",
-          isPickerOpen ? "opacity-100" : "opacity-0 group-hover:opacity-100"
-        )}>
+        <div className="flex flex-col items-center justify-center gap-1 px-1 transition-all self-center opacity-100">
           {/* Reaction Trigger Button */}
           {!message.isDeleted && !isDeleting && (
             <Button

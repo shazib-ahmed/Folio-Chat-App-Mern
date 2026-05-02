@@ -12,6 +12,7 @@ const KEY_PAIR_ALGORITHM = {
 
 const DB_NAME = "FolioChatCrypto";
 const STORE_NAME = "keys";
+const MESSAGE_STORE_NAME = "messages";
 
 // --- Base64 Helpers ---
 const b64Encode = (bytes: Uint8Array): string => {
@@ -48,9 +49,15 @@ export const b64Decode = (str: string): Uint8Array => {
 
 const getDB = (): Promise<IDBDatabase> => {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, 1);
+    const request = indexedDB.open(DB_NAME, 2); // Version 2 for messages store
     request.onupgradeneeded = () => {
-      request.result.createObjectStore(STORE_NAME);
+      const db = request.result;
+      if (!db.objectStoreNames.contains(STORE_NAME)) {
+        db.createObjectStore(STORE_NAME);
+      }
+      if (!db.objectStoreNames.contains(MESSAGE_STORE_NAME)) {
+        db.createObjectStore(MESSAGE_STORE_NAME);
+      }
     };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
@@ -511,5 +518,43 @@ export const rewrapFileMeta = async (
   } catch (err) {
     console.error("Re-wrapping file metadata failed:", err);
     return metadataStr; // Fallback to original
+  }
+};
+
+// --- Message Caching ---
+
+export const saveCachedMessages = async (chatId: string, messages: any[]) => {
+  try {
+    const db = await getDB();
+    const tx = db.transaction(MESSAGE_STORE_NAME, 'readwrite');
+    const store = tx.objectStore(MESSAGE_STORE_NAME);
+    
+    // Store only the last 10 messages
+    const last10 = messages.slice(-10);
+    await store.put(last10, chatId);
+    
+    return new Promise((resolve, reject) => {
+      tx.oncomplete = () => resolve(true);
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch (err) {
+    console.error("Failed to save messages to cache:", err);
+  }
+};
+
+export const getCachedMessages = async (chatId: string): Promise<any[]> => {
+  try {
+    const db = await getDB();
+    const tx = db.transaction(MESSAGE_STORE_NAME, 'readonly');
+    const store = tx.objectStore(MESSAGE_STORE_NAME);
+    const request = store.get(chatId);
+    
+    return new Promise((resolve) => {
+      request.onsuccess = () => resolve(request.result || []);
+      request.onerror = () => resolve([]);
+    });
+  } catch (err) {
+    console.error("Failed to get messages from cache:", err);
+    return [];
   }
 };

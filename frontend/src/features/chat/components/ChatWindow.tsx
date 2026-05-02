@@ -11,7 +11,7 @@ import { Chat, Message } from "../types";
 import { cn } from "@/shared/lib/utils";
 
 import { getMessagesApi, sendMessageApi, markSeenApi, blockUserApi, unblockUserApi, acceptRequestApi, searchMessagesApi, getPublicKeyApi, uploadFileApi, updateMessageApi, deleteMessageApi, getChatListApi } from '../chatService';
-import { encryptForBoth, decryptMessage, getLocalPrivateKey, encryptFileForBoth, isEncryptedPayload, rewrapFileMeta } from '@/shared/lib/cryptoUtils';
+import { encryptForBoth, decryptMessage, getLocalPrivateKey, encryptFileForBoth, isEncryptedPayload, rewrapFileMeta, saveCachedMessages, getCachedMessages } from '@/shared/lib/cryptoUtils';
 
 import { subscribeToMessages, getSocket } from '@/shared/lib/socket';
 import { useSelector, useDispatch } from 'react-redux';
@@ -128,6 +128,7 @@ export function ChatWindow({
   const { isE2eeInitialized } = useSelector((state: RootState) => state.chat);
   // Fetch messages and public key when chat changes
   useEffect(() => {
+    let isMounted = true;
     if (chat?.username && isE2eeInitialized) {
       setIsLoadingMessages(true);
       setLocalMessages([]); // Clear messages immediately when switching chats
@@ -140,9 +141,8 @@ export function ChatWindow({
         getPublicKeyApi(me.username).then(key => setMyPublicKey(key)).catch(e => console.error(e));
       }
 
-      (getMessagesApi(chat.username) as Promise<any>).then(async data => {
-        const privateKey = me?.id ? await getLocalPrivateKey(String(me.id)) : null;
-        const decryptedMessages = await Promise.all((data.messages || []).map(async (msg: any) => {
+      const decryptMessageBatch = async (messages: any[], privateKey: CryptoKey | null) => {
+        return await Promise.all((messages || []).map(async (msg: any) => {
           if (!msg.isEncrypted || !privateKey) return msg;
 
           let decryptedText = msg.text;
@@ -160,7 +160,6 @@ export function ChatWindow({
                 decryptedText = parsed.text ? await decryptMessage(parsed.text, privateKey, isSender, msg.id) : "";
                 fileMeta = parsed.fileMeta;
               } else if (parsed.iv) {
-                // If it has iv/r/s but no fileMeta, it's either text or just fileMeta
                 if (parsed.c || parsed.text) {
                   decryptedText = await decryptMessage(msg.text, privateKey, isSender, msg.id);
                 } else if (parsed.m) {
@@ -173,18 +172,14 @@ export function ChatWindow({
             }
           }
 
-
-          // 2. Decrypt fileUrl if it's an encrypted payload
           if (msg.fileUrl && isEncryptedPayload(msg.fileUrl)) {
             decryptedFileUrl = await decryptMessage(msg.fileUrl, privateKey, isSender, msg.id);
           }
 
-          // 3. Decrypt fileName if it's an encrypted payload
           if (msg.fileName && isEncryptedPayload(msg.fileName)) {
             decryptedFileName = await decryptMessage(msg.fileName, privateKey, isSender, msg.id);
           }
 
-          // 4. Decrypt fileSize if it's an encrypted payload
           let decryptedFileSize = msg.fileSize;
           if (msg.fileSize && isEncryptedPayload(msg.fileSize)) {
             decryptedFileSize = await decryptMessage(msg.fileSize, privateKey, isSender, msg.id);
@@ -200,7 +195,6 @@ export function ChatWindow({
                 text = await decryptMessage(msg.replyTo.text, privateKey, isReplySender);
               }
 
-              // If it's a file without caption, use a friendly label
               if (!text && msg.replyTo.messageType !== 'TEXT') {
                 const labels: any = { 'IMAGE': '📷 Photo', 'VIDEO': '🎥 Video', 'AUDIO': '🎵 Audio', 'FILE': '📄 File' };
                 text = labels[msg.replyTo.messageType] || '📄 Attachment';
@@ -219,11 +213,30 @@ export function ChatWindow({
             fileMeta,
             replyTo: decryptedReply
           };
-
         }));
+      };
+
+      // Load cached messages first
+      getCachedMessages(chat.username).then(async cached => {
+        if (cached && cached.length > 0 && isMounted) {
+          const privateKey = me?.id ? await getLocalPrivateKey(String(me.id)) : null;
+          const decrypted = await decryptMessageBatch(cached, privateKey);
+          if (isMounted) {
+            setLocalMessages(decrypted);
+            // Don't set isLoadingMessages to false yet, we still want to fetch fresh data
+          }
+        }
+      });
+
+      (getMessagesApi(chat.username) as Promise<any>).then(async data => {
+        const privateKey = me?.id ? await getLocalPrivateKey(String(me.id)) : null;
+        const decryptedMessages = await decryptMessageBatch(data.messages || [], privateKey);
 
 
-        setLocalMessages(decryptedMessages);
+        if (isMounted) {
+          setLocalMessages(decryptedMessages);
+          saveCachedMessages(chat.username, data.messages || []); // Save RAW messages
+        }
         setIsBlocked(data.isBlocked);
         setBlockedByMe(data.blockedByMe);
         setChatStatus(data.chatStatus || 'ACCEPTED');
@@ -239,6 +252,10 @@ export function ChatWindow({
     } else {
       setLocalMessages([]);
     }
+
+    return () => {
+      isMounted = false;
+    };
   }, [chat?.id, chat?.username, me?.id, me?.username, dispatch, isE2eeInitialized]);
 
   // Handle message search with debounce and cancellation
@@ -560,6 +577,14 @@ export function ChatWindow({
             dispatch(clearUnreadCount(chat.id));
           }).catch(err => console.error('Failed to mark as seen:', err));
         }
+
+        // Update cache
+        getCachedMessages(chat.username).then(cached => {
+          if (!cached.some(m => String(m.id) === String(msg.id))) {
+            const updated = [...cached, msg].slice(-10);
+            saveCachedMessages(chat.username, updated);
+          }
+        });
       }
 
       if (msg.type === 'chatRequestAccepted' && chat) {
