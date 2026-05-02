@@ -38,6 +38,9 @@ export class AuthController {
     return this.authService.refreshTokens(dto.refreshToken);
   }
 
+  /**
+   * Updates the user's profile information and avatar.
+   */
   @UseGuards(JwtAuthGuard)
   @Patch('profile')
   @UseInterceptors(FileInterceptor('avatar'))
@@ -46,12 +49,6 @@ export class AuthController {
     @Body() dto: UpdateProfileDto,
     @UploadedFile() file: Express.Multer.File
   ) {
-    console.log(`Auth.updateProfile: Received file: ${!!file}`);
-    if (file) {
-      console.log(` - File name: ${file.originalname}, size: ${file.size}`);
-    }
-    console.log('Auth.updateProfile: DTO keys:', Object.keys(dto));
-    
     const user = req.user as any;
     return this.authService.updateProfile(user.userId, dto, file);
   }

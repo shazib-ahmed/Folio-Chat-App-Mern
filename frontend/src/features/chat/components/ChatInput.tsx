@@ -14,12 +14,14 @@ import {
   faReply,
   faMicrophone
 } from '@fortawesome/free-solid-svg-icons';
-import EmojiPicker, { Theme } from 'emoji-picker-react';
+import { Theme } from 'emoji-picker-react';
 import { getSocket } from '@/shared/lib/socket';
 import { markSeenApi } from '../chatService';
 import { clearUnreadCount } from '../chatSlice';
 import { useDispatch } from 'react-redux';
 import { Chat, Message } from '../types';
+
+const EmojiPicker = React.lazy(() => import('emoji-picker-react'));
 
 interface ChatInputProps {
   chat: Chat;
@@ -240,12 +242,14 @@ export const ChatInput: React.FC<ChatInputProps> = React.memo(({
 
                     {isEmojiPickerOpen && (
                       <div className="absolute bottom-full left-0 mb-4 z-50" ref={pickerRef}>
-                        <EmojiPicker
-                          onEmojiClick={handleEmojiClick}
-                          theme={Theme.AUTO}
-                          width={320}
-                          height={400}
-                        />
+                        <React.Suspense fallback={<div className="w-[320px] h-[400px] bg-background border rounded-lg animate-pulse" />}>
+                          <EmojiPicker
+                            onEmojiClick={handleEmojiClick}
+                            theme={Theme.AUTO}
+                            width={320}
+                            height={400}
+                          />
+                        </React.Suspense>
                       </div>
                     )}
                   </div>
@@ -277,7 +281,7 @@ export const ChatInput: React.FC<ChatInputProps> = React.memo(({
                         }).catch(err => console.error('Failed to mark as seen:', err));
                       }
                     }}
-                    className="flex-1 bg-background border border-primary/20 focus-visible:ring-1 focus-visible:ring-primary/30 h-10 px-4 rounded-full transition-all"
+                    className="flex-1 bg-background border border-primary/20 focus-visible:ring-0 focus-visible:ring-offset-0 outline-none h-10 px-4 rounded-full transition-all"
                   />
 
                     <Button

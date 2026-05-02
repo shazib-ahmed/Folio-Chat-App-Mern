@@ -27,6 +27,10 @@ export class ChatController {
     return this.chatService.getUserByUsername(username);
   }
 
+  /**
+   * Sends a message to a specific user.
+   * Supports text, media files, and E2EE encrypted content.
+   */
   @Post('send')
   @UseInterceptors(FileInterceptor('file', {
     limits: { fileSize: 100 * 1024 * 1024 } // 100MB
@@ -37,9 +41,8 @@ export class ChatController {
     @UploadedFile() file?: Express.Multer.File,
   ) {
     const { receiverId, message, type, isEncrypted, clientMsgId, fileUrl, fileName, fileSize, isForwarded, sourceMessageId, replyToId } = body;
-    console.log('DEBUG: sendMessage body:', { receiverId, type, isEncrypted, fileUrl: !!fileUrl, fileName: !!fileName, isForwarded, sourceMessageId, replyToId });
-    
     const user = req.user as any;
+    
     return this.chatService.sendMessage(
       user.userId, 
       Number(receiverId), 

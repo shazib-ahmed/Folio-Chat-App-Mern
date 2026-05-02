@@ -4,49 +4,39 @@ import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { UpdatePasswordDto } from './dto/update-password.dto';
-import { CloudinaryService } from '../cloudinary/cloudinary.service';
 import * as bcrypt from 'bcrypt';
-import { JwtService } from '@nestjs/jwt';
-import { ConfigService } from '@nestjs/config';
+import { AuthTokenService } from './services/auth-token.service';
+import { AuthProfileService } from './services/auth-profile.service';
 
+/**
+ * Core authentication service.
+ * Handles user registration, login, and coordinates token/profile management.
+ */
 @Injectable()
 export class AuthService {
   constructor(
     private prisma: PrismaService,
-    private jwtService: JwtService,
-    private configService: ConfigService,
-    private cloudinary: CloudinaryService,
+    private tokenService: AuthTokenService,
+    private profileService: AuthProfileService,
   ) {}
 
+  /**
+   * Registers a new user and returns access/refresh tokens.
+   * @throws ConflictException if email, username, or phone already exists.
+   */
   async register(dto: RegisterDto) {
-    // Check if email already exists
-    const existingEmail = await this.prisma.user.findUnique({
-      where: { email: dto.email },
-    });
-    if (existingEmail) {
-      throw new ConflictException('Email already exists');
-    }
+    const existingEmail = await this.prisma.user.findUnique({ where: { email: dto.email } });
+    if (existingEmail) throw new ConflictException('Email already exists');
 
-    // Check if username already exists
-    const existingUsername = await this.prisma.user.findUnique({
-      where: { username: dto.username },
-    });
-    if (existingUsername) {
-      throw new ConflictException('Username already taken');
-    }
+    const existingUsername = await this.prisma.user.findUnique({ where: { username: dto.username } });
+    if (existingUsername) throw new ConflictException('Username already taken');
 
-    // Check if phone already exists (if provided)
     if (dto.phone) {
-      const existingPhone = await this.prisma.user.findUnique({
-        where: { phone: dto.phone },
-      });
-      if (existingPhone) {
-        throw new ConflictException('Phone number already exists');
-      }
+      const existingPhone = await this.prisma.user.findUnique({ where: { phone: dto.phone } });
+      if (existingPhone) throw new ConflictException('Phone number already exists');
     }
 
     const hashedPassword = await bcrypt.hash(dto.password, 10);
-
     const user = await this.prisma.user.create({
       data: {
         ...dto,
@@ -55,17 +45,18 @@ export class AuthService {
       },
     });
 
-
-    const tokens = await this.getTokens(user.id, user.username);
-    await this.updateRefreshToken(user.id, tokens.refresh_token);
+    const tokens = await this.tokenService.getTokens(user.id, user.username);
+    await this.tokenService.updateRefreshToken(user.id, tokens.refresh_token);
 
     const { password, refreshToken, ...userWithoutPassword } = user;
-    return {
-      ...tokens,
-      user: userWithoutPassword,
-    };
+    return { ...tokens, user: userWithoutPassword };
   }
 
+  /**
+   * Authenticates a user and returns access/refresh tokens.
+   * Supports login via email, username, or phone.
+   * @throws UnauthorizedException for invalid credentials.
+   */
   async login(dto: LoginDto) {
     const user = await this.prisma.user.findFirst({
       where: {
@@ -77,26 +68,20 @@ export class AuthService {
       },
     });
 
-    if (!user) {
+    if (!user || !(await bcrypt.compare(dto.password, user.password))) {
       throw new UnauthorizedException('Invalid credentials');
     }
 
-    const isPasswordValid = await bcrypt.compare(dto.password, user.password);
-
-    if (!isPasswordValid) {
-      throw new UnauthorizedException('Invalid credentials');
-    }
-
-    const tokens = await this.getTokens(user.id, user.username);
-    await this.updateRefreshToken(user.id, tokens.refresh_token);
+    const tokens = await this.tokenService.getTokens(user.id, user.username);
+    await this.tokenService.updateRefreshToken(user.id, tokens.refresh_token);
 
     const { password, refreshToken, ...userWithoutPassword } = user;
-    return {
-      ...tokens,
-      user: userWithoutPassword,
-    };
+    return { ...tokens, user: userWithoutPassword };
   }
 
+  /**
+   * Invalidates the user's refresh token on logout.
+   */
   async logout(userId: number) {
     return this.prisma.user.update({
       where: { id: userId },
@@ -105,154 +90,18 @@ export class AuthService {
   }
 
   async refreshTokens(refreshToken: string) {
-    try {
-      const payload = await this.jwtService.verifyAsync(refreshToken, {
-        secret: this.configService.getOrThrow<string>('JWT_SECRET'),
-      });
-      
-      const userId = payload.sub;
-      const user = await this.prisma.user.findUnique({
-        where: { id: userId },
-      });
-
-      if (!user || !user.refreshToken) {
-        throw new UnauthorizedException('Access Denied');
-      }
-
-      const refreshTokenMatches = await bcrypt.compare(refreshToken, user.refreshToken);
-      if (!refreshTokenMatches) {
-        throw new UnauthorizedException('Access Denied');
-      }
-
-      const tokens = await this.getTokens(user.id, user.username);
-      await this.updateRefreshToken(user.id, tokens.refresh_token);
-
-      return tokens;
-    } catch (e) {
-      throw new UnauthorizedException('Invalid refresh token');
-    }
-  }
-
-  async updateRefreshToken(userId: number, refreshToken: string) {
-    const hashedRefreshToken = await bcrypt.hash(refreshToken, 10);
-    await this.prisma.user.update({
-      where: { id: userId },
-      data: { refreshToken: hashedRefreshToken },
-    });
-  }
-
-  async getTokens(userId: number, username: string) {
-    const [accessToken, refreshToken] = await Promise.all([
-      this.jwtService.signAsync(
-        { sub: userId, username },
-        { expiresIn: '1d' },
-      ),
-      this.jwtService.signAsync(
-        { sub: userId, username },
-        { expiresIn: '365d' },
-      ),
-    ]);
-
-    return {
-      access_token: accessToken,
-      refresh_token: refreshToken,
-    };
+    return this.tokenService.refreshTokens(refreshToken);
   }
 
   async updateProfile(userId: number, dto: UpdateProfileDto, file?: Express.Multer.File) {
-    console.log(`UpdateProfile request for user ${userId}. File present: ${!!file}`);
-    // Handle avatar upload if file is provided
-    if (file) {
-      try {
-        const upload = await this.cloudinary.uploadFile(file, 'users');
-        dto.avatar = upload.secure_url;
-        console.log(`Avatar uploaded to Cloudinary: ${dto.avatar}`);
-      } catch (error) {
-        console.error('Failed to upload avatar to Cloudinary:', error);
-      }
-    } else if (dto.avatar && typeof dto.avatar !== 'string') {
-      // If avatar is coming as an object from multipart but no file was processed
-      console.log('Removing non-string avatar field from DTO');
-      delete dto.avatar;
-    }
-
-    console.log('Final DTO for Prisma update:', dto);
-
-    // Check if email already exists for another user
-    if (dto.email) {
-      const existingEmail = await this.prisma.user.findFirst({
-        where: { 
-          email: dto.email,
-          id: { not: userId }
-        },
-      });
-      if (existingEmail) {
-        throw new ConflictException('Email already exists');
-      }
-    }
-
-    // Check if username already exists for another user
-    if (dto.username) {
-      const existingUsername = await this.prisma.user.findFirst({
-        where: { 
-          username: dto.username,
-          id: { not: userId }
-        },
-      });
-      if (existingUsername) {
-        throw new ConflictException('Username already taken');
-      }
-    }
-
-    // Check if phone already exists for another user
-    if (dto.phone) {
-      const existingPhone = await this.prisma.user.findFirst({
-        where: { 
-          phone: dto.phone,
-          id: { not: userId }
-        },
-      });
-      if (existingPhone) {
-        throw new ConflictException('Phone number already exists');
-      }
-    }
-
-    const updatedUser = await this.prisma.user.update({
-      where: { id: userId },
-      data: dto,
-    });
-
-    const { password, refreshToken, ...userWithoutPassword } = updatedUser;
-    return userWithoutPassword;
+    return this.profileService.updateProfile(userId, dto, file);
   }
 
   async updatePassword(userId: number, dto: UpdatePasswordDto) {
-    const user = await this.prisma.user.findUnique({
-      where: { id: userId },
-    });
-
-    if (!user) {
-      throw new UnauthorizedException('User not found');
-    }
-
-    const isPasswordValid = await bcrypt.compare(dto.oldPassword, user.password);
-    if (!isPasswordValid) {
-      throw new UnauthorizedException('Invalid old password');
-    }
-
-    const hashedPassword = await bcrypt.hash(dto.newPassword, 10);
-    await this.prisma.user.update({
-      where: { id: userId },
-      data: { password: hashedPassword },
-    });
-
-    return { message: 'Password updated successfully' };
+    return this.profileService.updatePassword(userId, dto);
   }
 
   async updatePublicKey(userId: number, publicKey: string) {
-    return this.prisma.user.update({
-      where: { id: userId },
-      data: { publicKey },
-    });
+    return this.profileService.updatePublicKey(userId, publicKey);
   }
 }

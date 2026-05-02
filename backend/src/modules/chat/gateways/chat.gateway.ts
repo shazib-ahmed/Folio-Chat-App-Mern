@@ -8,7 +8,7 @@ import {
   ConnectedSocket,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
-import { PrismaService } from 'src/database/prisma.service';
+import { PrismaService } from '../../../database/prisma.service';
 import { forwardRef, Inject } from '@nestjs/common';
 import { ChatService } from '../chat.service';
 import { JwtService } from '@nestjs/jwt';
