@@ -1,70 +1,48 @@
-# Folio-Messenger
+# Folio-Messenger Frontend 🎨
 
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
+The frontend of Folio-Messenger is a modern, responsive React application designed for high-performance real-time communication. It leverages advanced browser APIs for encryption and P2P communication.
 
-## Available Scripts
+## 🚀 Key Features
 
-In the project directory, you can run:
+- **🔒 End-to-End Encryption**: Implemented using the Web Crypto API (SubtleCrypto). Keys are generated locally and never leave the device in unencrypted form.
+- **📞 WebRTC Integration**: Seamless audio and video calling directly in the browser.
+- **📱 Responsive Design**: Fully responsive UI built with Tailwind CSS, supporting mobile and desktop views.
+- **🌓 Dark Mode**: Sophisticated dark theme with premium aesthetics and glassmorphism components.
+- **⚡ Redux State Management**: Centralized state for chats, messages, and authentication using Redux Toolkit.
+- **🔔 Real-time Notifications**: Custom audio alerts and UI indicators for incoming messages.
 
-### `npm start`
+## 🛠️ Technical Stack
 
-Runs the app in the development mode.\
-Open [http://localhost:3000](http://localhost:3000) to view it in your browser.
+- **React 18**: Core UI library.
+- **Redux Toolkit**: Global state management and async thunks.
+- **Tailwind CSS**: Utility-first styling with custom animation extensions.
+- **Socket.io-client**: Real-time websocket communication.
+- **React Router 6**: Client-side routing with protected route guards.
+- **FontAwesome**: High-quality vector icons.
 
-The page will reload when you make changes.\
-You may also see any lint errors in the console.
+## 📁 Architecture
 
-### `npm test`
+The project follows a modular, feature-based architecture:
+- `src/features/`: Contains domain-specific logic, components, and slices (Chat, Auth, Settings).
+- `src/shared/`: Reusable UI components (`src/shared/ui`), hooks (`src/shared/hooks`), and global utilities (`src/shared/lib`).
+- `src/app/`: Core application setup including the Redux store.
 
-Launches the test runner in the interactive watch mode.\
-See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
+## ⚙️ Setup & Development
 
-### `npm run build`
+### Environment Variables
+Create a `.env` file in the root of the `frontend` directory:
+```env
+REACT_APP_API_URL=http://localhost:5000/api
+REACT_APP_SOCKET_URL=http://localhost:5000
+APP_ENCRYPTION_KEY=your_secret_encryption_key
+```
 
-Builds the app for production to the `build` folder.\
-It correctly bundles React in production mode and optimizes the build for the best performance.
+### Commands
+- `npm start`: Runs the app in development mode.
+- `npm run build`: Builds the app for production.
+- `npm test`: Launches the test runner.
 
-The build is minified and the filenames include the hashes.\
-Your app is ready to be deployed!
-
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
-
-### `npm run eject`
-
-**Note: this is a one-way operation. Once you `eject`, you can't go back!**
-
-If you aren't satisfied with the build tool and configuration choices, you can `eject` at any time. This command will remove the single build dependency from your project.
-
-Instead, it will copy all the configuration files and the transitive dependencies (webpack, Babel, ESLint, etc) right into your project so you have full control over them. All of the commands except `eject` will still work, but they will point to the copied scripts so you can tweak them. At this point you're on your own.
-
-You don't have to ever use `eject`. The curated feature set is suitable for small and middle deployments, and you shouldn't feel obligated to use this feature. However we understand that this tool wouldn't be useful if you couldn't customize it when you are ready for it.
-
-## Learn More
-
-You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
-
-To learn React, check out the [React documentation](https://reactjs.org/).
-
-### Code Splitting
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/code-splitting](https://facebook.github.io/create-react-app/docs/code-splitting)
-
-### Analyzing the Bundle Size
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size](https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size)
-
-### Making a Progressive Web App
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app](https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app)
-
-### Advanced Configuration
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/advanced-configuration](https://facebook.github.io/create-react-app/docs/advanced-configuration)
-
-### Deployment
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/deployment](https://facebook.github.io/create-react-app/docs/deployment)
-
-### `npm run build` fails to minify
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify](https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify)
+## 🤝 Contributing
+Please ensure all components follow the shared UI patterns and use the established Tailwind design tokens.
+## 📄 License
+Distributed under the MIT License.
