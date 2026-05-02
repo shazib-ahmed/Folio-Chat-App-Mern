@@ -121,7 +121,6 @@ export const getLocalKeys = async (userId: string): Promise<{ privateKey: Crypto
 
         if (legacyPriv) {
            // We found a legacy key! Migrate it to the current user.
-           console.log(`Migrating legacy E2EE key to user ${userId}`);
            mStore.put(legacyPriv, `privateKey_${userId}`);
            
            // We might not have a legacy public key, but that's okay for decryption
@@ -146,13 +145,7 @@ export const getLocalPrivateKey = async (userId: string): Promise<CryptoKey | nu
 
 // --- Helpers ---
 
-const uint8ArrayToBase64 = (arr: Uint8Array): string => {
-  let binary = "";
-  for (let i = 0; i < arr.length; i++) {
-    binary += String.fromCharCode(arr[i]);
-  }
-  return btoa(binary);
-};
+const uint8ArrayToBase64 = b64Encode;
 
 const base64ToUint8Array = (base64: string): Uint8Array => {
   return b64Decode(base64);
@@ -201,13 +194,14 @@ export const importPrivateKey = async (pem: string): Promise<CryptoKey> => {
 
 /**
  * Hybrid Encryption (Multi-Recipient):
- * 1. Generates random AES-GCM key.
- * 2. Encrypts text with AES-GCM.
- * 3. Encrypts AES key TWICE:
- *    - Once with the recipient's RSA Public Key.
- *    - Once with the sender's RSA Public Key.
- * 4. Returns combined base64 string.
- * Format: IV(12) | SenderEncAesKey(256) | RecipientEncAesKey(256) | EncryptedContent
+ * 1. Generates a random AES-GCM session key.
+ * 2. Encrypts the payload with the AES key.
+ * 3. Encrypts the AES session key for both the sender and recipient using their RSA Public Keys.
+ * 4. Returns a JSON-stringified package containing IV, encrypted keys, and ciphertext.
+ * 
+ * @param text The plain text message to encrypt.
+ * @param recipientPubKeyPem The recipient's RSA public key in PEM format.
+ * @param senderPubKeyPem The sender's RSA public key in PEM format.
  */
 export const encryptForBoth = async (text: string, recipientPubKeyPem: string, senderPubKeyPem: string): Promise<string> => {
   const recipientKey = await importPublicKey(recipientPubKeyPem);
@@ -264,6 +258,16 @@ export const isEncryptedPayload = (val: any): boolean => {
   }
 };
 
+/**
+ * Hybrid Decryption:
+ * 1. Decrypts the AES-GCM session key using the provided RSA Private Key.
+ * 2. Decrypts the ciphertext using the recovered AES key.
+ * 
+ * @param jsonCipher The JSON package containing the encrypted message data.
+ * @param privateKey The recipient's RSA Private Key.
+ * @param isSender Boolean indicating if the current user is the original sender.
+ * @param msgId Optional message identifier for error tracing.
+ */
 export const decryptMessage = async (jsonCipher: string, privateKey: CryptoKey, isSender: boolean, msgId?: string): Promise<string> => {
   try {
     if (!jsonCipher || !isEncryptedPayload(jsonCipher)) return jsonCipher || "";
@@ -291,7 +295,6 @@ export const decryptMessage = async (jsonCipher: string, privateKey: CryptoKey, 
     let decryptedAesKeyRaw: ArrayBuffer;
 
     try {
-      console.log(`DEBUG: Decrypting AES key for ${isSender ? 'sender' : 'recipient'} slot... (msg ${msgId})`);
       decryptedAesKeyRaw = await window.crypto.subtle.decrypt(
         { name: "RSA-OAEP" },
         privateKey,
@@ -299,7 +302,6 @@ export const decryptMessage = async (jsonCipher: string, privateKey: CryptoKey, 
       ) as ArrayBuffer;
     } catch (err) {
       // Fallback: Try the other key slot
-      console.log(`DEBUG: Primary slot failed (msg ${msgId}), trying fallback slot...`);
       encryptedAesKeyToUse = isSender ? data.r : data.s;
       if (!encryptedAesKeyToUse) {
         console.error("DEBUG: No fallback key slot available in payload:", data);
@@ -311,7 +313,6 @@ export const decryptMessage = async (jsonCipher: string, privateKey: CryptoKey, 
         privateKey,
         base64ToUint8Array(encryptedAesKeyToUse) as any
       ) as ArrayBuffer;
-      console.log("DEBUG: Fallback decryption succeeded!");
     }
 
     const aesKey = await window.crypto.subtle.importKey(
@@ -427,7 +428,6 @@ export const decryptFile = async (
     ) as ArrayBuffer;
   } catch (err) {
     // Fallback: Try the other key slot
-    console.log("DEBUG: Primary decryption failed, trying fallback slot...");
     encryptedAesKeyB64 = isSender ? metadata.r : metadata.s;
     if (!encryptedAesKeyB64) throw new Error("No fallback key slot available");
     
@@ -557,4 +557,91 @@ export const getCachedMessages = async (chatId: string): Promise<any[]> => {
     console.error("Failed to get messages from cache:", err);
     return [];
   }
+};
+
+/**
+ * Batch Decryption Utility:
+ * Efficiently decrypts an array of messages using a single Private Key instance.
+ * Handles complex message objects including text, file metadata, and replies.
+ * 
+ * @param messages Array of encrypted message objects.
+ * @param privateKey The RSA Private Key for decryption.
+ * @param currentUserId The ID of the current user (used to identify sender/recipient slots).
+ */
+export const decryptMessageBatch = async (messages: any[], privateKey: CryptoKey | null, currentUserId?: string) => {
+  if (!messages || messages.length === 0) return [];
+  if (!privateKey) return messages;
+
+  return await Promise.all(messages.map(async (msg: any) => {
+    if (!msg.isEncrypted) return msg;
+
+    let decryptedText = msg.text;
+    let decryptedFileUrl = msg.fileUrl;
+    let decryptedFileName = msg.fileName;
+    let fileMeta = "";
+
+    const isSender = currentUserId ? String(msg.senderId) === String(currentUserId) : false;
+
+    // 1. Extract fileMeta and potentially decrypt text
+    if (msg.text && (isEncryptedPayload(msg.text) || msg.text.includes('"fileMeta"'))) {
+      try {
+        const parsed = JSON.parse(msg.text);
+        if (parsed.fileMeta) {
+          decryptedText = parsed.text ? await decryptMessage(parsed.text, privateKey, isSender, msg.id) : "";
+          fileMeta = parsed.fileMeta;
+        } else if (parsed.iv) {
+          if (parsed.c || parsed.text) {
+            decryptedText = await decryptMessage(msg.text, privateKey, isSender, msg.id);
+          } else if (parsed.m) {
+            fileMeta = msg.text;
+            decryptedText = "";
+          }
+        }
+      } catch (e) {
+        console.error("Batch Decryption: Failed to parse message JSON:", e);
+      }
+    }
+
+    if (msg.fileUrl && isEncryptedPayload(msg.fileUrl)) {
+      decryptedFileUrl = await decryptMessage(msg.fileUrl, privateKey, isSender, msg.id);
+    }
+
+    if (msg.fileName && isEncryptedPayload(msg.fileName)) {
+      decryptedFileName = await decryptMessage(msg.fileName, privateKey, isSender, msg.id);
+    }
+
+    let decryptedFileSize = msg.fileSize;
+    if (msg.fileSize && isEncryptedPayload(msg.fileSize)) {
+      decryptedFileSize = await decryptMessage(msg.fileSize, privateKey, isSender, msg.id);
+    }
+
+    let decryptedReply = msg.replyTo;
+    if (msg.replyTo) {
+      try {
+        const isReplySender = currentUserId ? String(msg.replyTo.senderId) === String(currentUserId) : false;
+        let text = msg.replyTo.text;
+
+        if (msg.replyTo.text && isEncryptedPayload(msg.replyTo.text)) {
+          text = await decryptMessage(msg.replyTo.text, privateKey, isReplySender);
+        }
+
+        if (!text && msg.replyTo.messageType !== 'TEXT') {
+          const labels: any = { 'IMAGE': '📷 Photo', 'VIDEO': '🎥 Video', 'AUDIO': '🎵 Audio', 'FILE': '📄 File' };
+          text = labels[msg.replyTo.messageType] || '📄 Attachment';
+        }
+
+        decryptedReply = { ...msg.replyTo, text };
+      } catch (e) { }
+    }
+
+    return {
+      ...msg,
+      text: decryptedText,
+      fileUrl: decryptedFileUrl,
+      fileName: decryptedFileName,
+      fileSize: decryptedFileSize,
+      fileMeta,
+      replyTo: decryptedReply
+    };
+  }));
 };

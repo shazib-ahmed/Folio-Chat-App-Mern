@@ -4,7 +4,10 @@ import './index.css';
 import App from './app/app';
 import { Provider } from 'react-redux';
 import { store } from './app/store';
-import reportWebVitals from './reportWebVitals';
+import { injectStore } from './shared/lib/axios';
+
+// Inject store into axios to break circular dependencies
+injectStore(store);
 
 const rootElement = document.getElementById('root');
 if (!rootElement) throw new Error('Failed to find the root element');
@@ -18,4 +21,4 @@ root.render(
   </React.StrictMode>
 );
 
-reportWebVitals();
+

@@ -84,12 +84,9 @@ export function ProfileSettings() {
       
       if (selectedFile) {
         data.append('avatar', selectedFile);
-        console.log('Appending avatar file to FormData:', selectedFile.name);
       }
 
-      console.log('Sending Profile Update FormData...');
       data.forEach((value, key) => {
-        console.log(key + ': ' + (value instanceof File ? `File (${value.name})` : value));
       });
 
       const updatedUser = await updateProfileApi(data);

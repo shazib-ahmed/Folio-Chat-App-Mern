@@ -107,7 +107,7 @@ export function ChatListItem({ chat, isActive, onClick }: ChatListItemProps) {
           <AvatarFallback>{chat.name.substring(0, 2).toUpperCase()}</AvatarFallback>
         </Avatar>
         {chat.online && (
-          <span className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-green-500 border-2 border-background rounded-full" />
+          <span className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-emerald-500 border-2 border-background rounded-full" />
         )}
       </div>
 

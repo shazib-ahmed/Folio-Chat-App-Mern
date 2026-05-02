@@ -1,18 +1,34 @@
 import axios from 'axios';
-import { store } from '@/app/store';
-import { setCredentials, logout } from '@/features/auth/authSlice';
+import { decryptData } from '@/shared/utils/encryption';
 
-const API_URL = (process.env.API_URL);
+const API_URL = process.env.API_URL;
+
+// We'll inject the store later to avoid circular dependencies
+let store: any;
+export const injectStore = (_store: any) => {
+  store = _store;
+};
 
 const api = axios.create({
   baseURL: API_URL,
 });
 
+// Helper to get token from localStorage directly (to avoid store dependency in request)
+const getAccessToken = () => {
+  const encryptedToken = localStorage.getItem('t_data');
+  return encryptedToken ? decryptData(encryptedToken) : null;
+};
+
+const getRefreshToken = () => {
+  const encryptedRefreshToken = localStorage.getItem('rt_data');
+  return encryptedRefreshToken ? decryptData(encryptedRefreshToken) : null;
+};
+
 // Request Interceptor: Attach Access Token
 api.interceptors.request.use(
   (config) => {
-    const state = store.getState();
-    const token = state.auth.token;
+    // Try to get token from store if available, otherwise fallback to localStorage
+    const token = store ? store.getState().auth.token : getAccessToken();
 
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
@@ -37,24 +53,25 @@ api.interceptors.response.use(
       originalRequest._retry = true;
 
       try {
-        const state = store.getState();
-        const refreshToken = state.auth.refreshToken;
+        const refreshToken = store ? store.getState().auth.refreshToken : getRefreshToken();
 
         if (!refreshToken) throw new Error('No refresh token');
 
-        // Call refresh endpoint
+        // Call refresh endpoint using fresh axios instance to avoid interceptor loop
         const response = await axios.post(`${API_URL}/auth/refresh`, { refreshToken });
         const { access_token, refresh_token } = response.data;
 
-        // Update Redux Store (which also updates localStorage via its logic if implemented there, 
-        // but here we do it in the slice or interceptor. 
-        // Our slice's setCredentials handles localStorage.)
-        if (state.auth.user) {
-          store.dispatch(setCredentials({
-            user: state.auth.user,
-            access_token,
-            refresh_token
-          }));
+        if (store) {
+          // Import actions dynamically to avoid top-level circular dependency
+          const { setCredentials } = await import('@/features/auth/authSlice');
+          const user = store.getState().auth.user;
+          if (user) {
+            store.dispatch(setCredentials({
+              user,
+              access_token,
+              refresh_token
+            }));
+          }
         }
 
         // Update authorization header and retry
@@ -62,7 +79,10 @@ api.interceptors.response.use(
         return api(originalRequest);
       } catch (refreshError) {
         // Refresh failed, logout user
-        store.dispatch(logout());
+        if (store) {
+          const { logout } = await import('@/features/auth/authSlice');
+          store.dispatch(logout());
+        }
         return Promise.reject(refreshError);
       }
     }

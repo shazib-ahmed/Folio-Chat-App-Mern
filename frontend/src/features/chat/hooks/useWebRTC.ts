@@ -136,7 +136,7 @@ export const useWebRTC = ({ currentUserId, currentUserName, currentUserUsername,
       partnerRef.current = targetUser;
       updateCallType(type);
       updateCallState('OFFERING');
-      callingToneRef.current?.play().catch(e => console.log('Audio play failed:', e));
+      callingToneRef.current?.play().catch(e => {});
 
       // 45s timeout for missed call
       ringTimeoutRef.current = setTimeout(() => {
@@ -311,7 +311,6 @@ export const useWebRTC = ({ currentUserId, currentUserName, currentUserUsername,
       s.on('call:missed_busy', (data: any) => {
         // Fallback UI update - the backend handles the DB save, 
         // this ensures the sidebar updates even during a call.
-        console.log('UI: Received background missed call notification');
         // No need to call onLogCall as backend already saved it, 
         // but we could trigger a local refresh if needed.
       });
@@ -324,7 +323,7 @@ export const useWebRTC = ({ currentUserId, currentUserName, currentUserUsername,
         updateCallType(data.type || 'audio');
         pendingOfferRef.current = data.offer;
         updateCallState('RINGING');
-        ringtoneRef.current?.play().catch(e => console.log('Audio play failed:', e));
+      ringtoneRef.current?.play().catch(e => {});
         onIncomingCall?.(data);
 
         ringTimeoutRef.current = setTimeout(() => {

@@ -1,38 +1,61 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route, useParams, useLocation, useNavigate } from 'react-router-dom';
-import { ChatSidebar } from '@/features/chat/components/ChatSidebar';
-import { ChatWindow } from '@/features/chat/components/ChatWindow';
-import { AuthPage } from '@/features/auth/pages/AuthPage';
-import { ProfileSettings } from '@/features/settings/components/ProfileSettings';
-import { CredentialsSettings } from '@/features/settings/components/CredentialsSettings';
+import { useDispatch, useSelector } from 'react-redux';
 import { usePageTitle } from '@/shared/hooks/usePageTitle';
-import { Chat } from '@/features/chat/types';
 import { cn } from '@/shared/lib/utils';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faArrowLeft } from '@fortawesome/free-solid-svg-icons';
 import { Button } from '@/shared/ui/button';
 import { Card, CardContent } from '@/shared/ui/card';
 import { ProtectedRoute, PublicRoute } from '@/routes/ProtectedRoute';
-import { useDispatch, useSelector } from 'react-redux';
 import { RootState, AppDispatch } from '@/app/store';
 import { initiateSocketConnection, disconnectSocket, subscribeToMessages, getSocket } from '@/shared/lib/socket';
-import { fetchChatList, updateChatLastMessage, setTypingStatus, setUserStatus, updateChatStatus, updateChatPreview, setE2eeInitialized } from '@/features/chat/chatSlice';
-import { getUserByUsernameApi, setPublicKeyApi, getPublicKeyApi, sendMessageApi } from '@/features/chat/chatService';
+import { fetchChatList, updateChatLastMessage, setTypingStatus, setUserStatus, updateChatStatus, updateChatPreview, setE2eeInitialized, fetchSelectedChat, setSelectedChat } from '@/features/chat/chatSlice';
+import { setPublicKeyApi, getPublicKeyApi, sendMessageApi } from '@/features/chat/chatService';
 import { generateE2EEKeys, saveKeys, exportPublicKey, getLocalKeys, encryptForBoth, exportPrivateKey, importPrivateKey, importPublicKey } from '@/shared/lib/cryptoUtils';
 import { encryptData, decryptData } from '@/shared/utils/encryption';
 import { useWebRTC } from '@/features/chat/hooks/useWebRTC';
-import { CallOverlay } from '@/features/chat/components/CallOverlay';
 
+/**
+ * Lazy-loaded components for optimized bundle size and faster initial paint.
+ */
+const ChatSidebar = React.lazy(() => import('@/features/chat/components/ChatSidebar').then(m => ({ default: m.ChatSidebar })));
+const ChatWindow = React.lazy(() => import('@/features/chat/components/ChatWindow').then(m => ({ default: m.ChatWindow })));
+const AuthPage = React.lazy(() => import('@/features/auth/pages/AuthPage').then(m => ({ default: m.AuthPage })));
+const ProfileSettings = React.lazy(() => import('@/features/settings/components/ProfileSettings').then(m => ({ default: m.ProfileSettings })));
+const CredentialsSettings = React.lazy(() => import('@/features/settings/components/CredentialsSettings').then(m => ({ default: m.CredentialsSettings })));
+const CallOverlay = React.lazy(() => import('@/features/chat/components/CallOverlay').then(m => ({ default: m.CallOverlay })));
+
+const ChatSidebarSkeleton = React.lazy(() => import('@/features/chat/components/ChatSidebarSkeleton').then(m => ({ default: m.ChatSidebarSkeleton })));
+const ChatWindowSkeleton = React.lazy(() => import('@/features/chat/components/ChatWindowSkeleton').then(m => ({ default: m.ChatWindowSkeleton })));
+
+const LoadingScreen = () => (
+  <div className="flex h-screen w-screen overflow-hidden bg-background">
+    <div className="w-[350px] lg:w-[400px] border-r shrink-0">
+      <ChatSidebarSkeleton />
+    </div>
+    <div className="flex-1">
+      <ChatWindowSkeleton />
+    </div>
+  </div>
+);
+
+/**
+ * Main application layout component.
+ * Manages global states including Socket connections, E2EE initialization, and WebRTC signaling.
+ */
 function ChatLayout() {
-  const { chatId } = useParams<{ chatId: string }>(); // This is now a username
+  const { chatId } = useParams<{ chatId: string }>(); 
   const { pathname } = useLocation();
   const navigate = useNavigate();
   const dispatch = useDispatch<AppDispatch>();
   const { user, token } = useSelector((state: RootState) => state.auth);
-  const { chats } = useSelector((state: RootState) => state.chat);
-  const [selectedUser, setSelectedUser] = React.useState<Chat | undefined>(undefined);
+  const { chats, selectedChat, isLoadingSelectedChat } = useSelector((state: RootState) => state.chat);
 
-  // Global Call Logging Handler
+  /**
+   * Global handler for logging audio/video calls as messages.
+   * Ensures that call history is persisted with E2EE encryption just like regular messages.
+   */
   const onLogCallGlobal = React.useCallback(async (
     type: 'MISSED' | 'REJECTED' | 'ENDED' | 'NO_ANSWER' | 'BUSY', 
     duration?: number, 
@@ -43,27 +66,14 @@ function ChatLayout() {
     partnerUsername?: string
   ) => {
     if (!user) return;
-    
-    // Determine which chat this log belongs to
-    // Priority: explicitly passed partner info > currently active call partner
     const currentPartner = partnerId ? { id: partnerId, name: partnerName || 'User', username: partnerUsername } : partnerRef.current;
     if (!currentPartner) return;
 
     let plainText = '';
-    if (type === 'MISSED') {
-      plainText = isOwner ? 'Missed call' : `Missed call from ${currentPartner.name}`;
-    }
-    else if (type === 'BUSY') {
-      // The caller saves "Missed call" to the DB so the receiver sees it as a missed call,
-      // but we will show "User was busy" locally for the caller.
-      plainText = isOwner ? `Missed call` : `Missed call from ${currentPartner.name}`;
-    }
-    else if (type === 'NO_ANSWER') {
-      plainText = isOwner ? 'No answer' : `Missed call from ${currentPartner.name}`;
-    }
-    else if (type === 'REJECTED') {
-      plainText = isOwner ? `${currentPartner.name} declined` : 'You declined the call';
-    }
+    if (type === 'MISSED') plainText = isOwner ? 'Missed call' : `Missed call from ${currentPartner.name}`;
+    else if (type === 'BUSY') plainText = isOwner ? `Missed call` : `Missed call from ${currentPartner.name}`;
+    else if (type === 'NO_ANSWER') plainText = isOwner ? 'No answer' : `Missed call from ${currentPartner.name}`;
+    else if (type === 'REJECTED') plainText = isOwner ? `${currentPartner.name} declined` : 'You declined the call';
     else if (type === 'ENDED') {
       const mins = Math.floor((duration || 0) / 60);
       const secs = (duration || 0) % 60;
@@ -72,7 +82,6 @@ function ChatLayout() {
 
     const clientMsgId = providedLogId || `log-${Date.now()}`;
 
-    // Update Redux sidebar (optimistic for both sides)
     dispatch(updateChatLastMessage({
       chatId: String(currentPartner.id),
       message: type === 'BUSY' && isOwner ? `${currentPartner.name} was busy` : plainText,
@@ -87,35 +96,24 @@ function ChatLayout() {
       isForwarded: false
     }));
 
-    // Save to DB
-    // We allow both sides to save if it's a missed/rejected call to ensure it persists for the person who didn't trigger it
-    // But for simplicity, let's stick to: Sender saves their outgoing, Receiver saves their incoming missed.
     try {
-      // Use the partner's username if available, fallback to name (historical/search name)
       const targetUsername = currentPartner.username || currentPartner.name;
       const rKey = await getPublicKeyApi(targetUsername); 
       const mKey = await getPublicKeyApi(user.username);
-
       let encryptedText = plainText;
-      if (rKey && mKey) {
-        encryptedText = await encryptForBoth(plainText, rKey, mKey);
-      }
+      if (rKey && mKey) encryptedText = await encryptForBoth(plainText, rKey, mKey);
 
-      await sendMessageApi(
-        currentPartner.id,
-        encryptedText,
-        'CALL',
-        undefined,
-        !!(rKey && mKey),
-        clientMsgId
-      );
+      await sendMessageApi(currentPartner.id, encryptedText, 'CALL', undefined, !!(rKey && mKey), clientMsgId);
     } catch (err) {
-      console.error('Failed to log call globally:', err);
+      // Error handling is handled silently in production
     }
   }, [user, dispatch]);
 
   const partnerRef = React.useRef<{ id: string; name: string; username: string; avatar?: string } | null>(null);
 
+  /**
+   * WebRTC Hook for managing P2P audio/video communication.
+   */
   const {
     callState,
     localStream,
@@ -133,15 +131,9 @@ function ChatLayout() {
     currentUserName: user?.name || user?.username || 'User',
     currentUserUsername: user?.username || '',
     currentUserAvatar: user?.avatar,
-    onIncomingCall: (data) => {
-      console.log('Incoming call from:', data.fromName);
-    },
-    onCallAccepted: () => {
-      console.log('Call accepted');
-    },
-    onCallEnded: () => {
-      console.log('Call ended');
-    },
+    onIncomingCall: (data) => {},
+    onCallAccepted: () => {},
+    onCallEnded: () => {},
     onLogCall: onLogCallGlobal
   });
 
@@ -149,40 +141,33 @@ function ChatLayout() {
     partnerRef.current = callPartner;
   }, [callPartner]);
 
-  // Attach remote stream to audio element
   React.useEffect(() => {
     if (remoteStream) {
       const audioEl = document.getElementById('remoteAudio') as HTMLAudioElement;
-      if (audioEl) {
-        audioEl.srcObject = remoteStream;
-      }
+      if (audioEl) audioEl.srcObject = remoteStream;
     }
   }, [remoteStream]);
   
+  /**
+   * Core initialization logic:
+   * 1. Establishes Socket connection.
+   * 2. Orchestrates E2EE key management (local vs server synchronization).
+   * 3. Handles automatic key upgrades and legacy migrations.
+   */
   React.useEffect(() => {
     if (user?.id && token) {
       initiateSocketConnection(user.id, token);
-
       const initializeE2EE = async () => {
         try {
           const APP_ENCRYPTION_KEY = process.env.APP_ENCRYPTION_KEY;
-          if (!APP_ENCRYPTION_KEY) {
-             console.warn("APP_ENCRYPTION_KEY is missing. E2EE sync will not work across devices.");
-          }
-
-          // Check if user has a public key on the server
           const serverKeyPayload = await getPublicKeyApi(user.username);
-          console.log("DEBUG: serverKeyPayload type:", typeof serverKeyPayload, "value:", serverKeyPayload);
-          
           const localKeys = await getLocalKeys(String(user.id));
 
           if (!localKeys) {
-            // Check if it's a backup (either JSON string or parsed object)
+            // First-time setup or new device login
             const isBackup = (typeof serverKeyPayload === 'string' && serverKeyPayload.startsWith('{')) || 
                             (typeof serverKeyPayload === 'object' && serverKeyPayload !== null && (serverKeyPayload as any).pub && (serverKeyPayload as any).priv);
-
             if (serverKeyPayload && isBackup && APP_ENCRYPTION_KEY) {
-              console.log("Restoring E2EE keys from server backup...");
               try {
                 const parsed = typeof serverKeyPayload === 'string' ? JSON.parse(serverKeyPayload) : serverKeyPayload;
                 if (parsed.priv) {
@@ -190,71 +175,40 @@ function ChatLayout() {
                   if (decryptedPrivPem) {
                     const privateKey = await importPrivateKey(decryptedPrivPem);
                     const publicKey = await importPublicKey(parsed.pub); 
-                    
                     await saveKeys(String(user.id), { privateKey, publicKey });
-                    console.log("E2EE keys restored successfully.");
                     return;
-                  } else {
-                    console.error("Restoration failed: Decrypted private key is empty or invalid. Check APP_ENCRYPTION_KEY.");
                   }
                 }
-              } catch (e) {
-                console.error("Failed to restore keys from backup:", e);
-              }
+              } catch (e) {}
             }
-
-            console.log("Generating new E2EE keys...");
+            // Generate and persist new E2EE keys
             const keys = await generateE2EEKeys();
             await saveKeys(String(user.id), keys);
-            
             const pubPem = await exportPublicKey(keys.publicKey);
             const privPem = await exportPrivateKey(keys.privateKey);
-            
-            // Back up both to server (priv is encrypted)
             if (APP_ENCRYPTION_KEY) {
-               const backupPayload = JSON.stringify({
-                 pub: pubPem,
-                 priv: encryptData(privPem)
-               });
-               await setPublicKeyApi(backupPayload);
+               await setPublicKeyApi(JSON.stringify({ pub: pubPem, priv: encryptData(privPem) }));
             } else {
                await setPublicKeyApi(pubPem);
             }
-            console.log("E2EE keys generated and backed up to server.");
           } else {
-            // Local keys exist, check if server needs an upgrade/re-sync
+            // Validate existing keys and handle potential server mismatches or upgrades
             const isBackup = (typeof serverKeyPayload === 'string' && serverKeyPayload.startsWith('{')) || 
                             (typeof serverKeyPayload === 'object' && serverKeyPayload !== null && (serverKeyPayload as any).pub && (serverKeyPayload as any).priv);
-            
             const needsUpgrade = serverKeyPayload && !isBackup;
             const missingOnServer = !serverKeyPayload;
-            
-            // Check for mismatch
             let isMismatch = false;
             if (isBackup) {
                try {
                  const parsed = typeof serverKeyPayload === 'string' ? JSON.parse(serverKeyPayload) : serverKeyPayload;
                  const localPubPem = (await exportPublicKey(localKeys!.publicKey)).trim();
-                 const serverPubPem = (parsed.pub || "").trim();
-                 console.log("DEBUG: Local Pub Key (start):", localPubPem.substring(0, 20));
-                 console.log("DEBUG: Server Pub Key (start):", serverPubPem.substring(0, 20));
-                 
-                 if (serverPubPem !== localPubPem) {
-                   isMismatch = true;
-                   console.log("E2EE Mismatch detected between local and server keys.");
-                 }
+                 if ((parsed.pub || "").trim() !== localPubPem) isMismatch = true;
                } catch (e) {}
             } else if (serverKeyPayload && typeof serverKeyPayload === 'string') {
                const localPubPem = (await exportPublicKey(localKeys!.publicKey)).trim();
-               const serverPubPem = serverKeyPayload.trim();
-               if (serverPubPem !== localPubPem) {
-                 isMismatch = true;
-                 console.log("E2EE Mismatch detected (Server has plain public key).");
-               }
+               if (serverKeyPayload.trim() !== localPubPem) isMismatch = true;
             }
-
             if (isMismatch && isBackup && APP_ENCRYPTION_KEY) {
-              console.log("Attempting to resolve mismatch by restoring from server backup...");
               try {
                 const parsed = typeof serverKeyPayload === 'string' ? JSON.parse(serverKeyPayload) : serverKeyPayload;
                 const decryptedPrivPem = decryptData(parsed.priv);
@@ -262,47 +216,31 @@ function ChatLayout() {
                    const privateKey = await importPrivateKey(decryptedPrivPem);
                    const publicKey = await importPublicKey(parsed.pub);
                    await saveKeys(String(user.id), { privateKey, publicKey });
-                   console.log("Resolved mismatch: Server keys restored to local storage.");
                    return;
                 }
-              } catch (e) {
-                console.error("Failed to resolve mismatch via restore:", e);
-              }
+              } catch (e) {}
             }
-
             if ((needsUpgrade || missingOnServer || isMismatch) && APP_ENCRYPTION_KEY) {
-              console.log("Syncing/Backing up local key to server...");
               const pubPem = await exportPublicKey(localKeys!.publicKey);
               const privPem = await exportPrivateKey(localKeys!.privateKey);
-              
-              const backupPayload = JSON.stringify({
-                pub: pubPem,
-                priv: encryptData(privPem)
-              });
-              await setPublicKeyApi(backupPayload);
-              console.log("E2EE key sync completed.");
+              await setPublicKeyApi(JSON.stringify({ pub: pubPem, priv: encryptData(privPem) }));
             }
           }
         } catch (err) {
-          console.error("Failed to initialize E2EE:", err);
+          // Failure handled gracefully
         } finally {
           dispatch(setE2eeInitialized(true));
         }
       };
       initializeE2EE();
     }
-
     const handleBeforeUnload = () => {
       if (user?.id) {
         const socket = getSocket();
-        if (socket) {
-          socket.emit('userOffline', { userId: user.id });
-        }
+        if (socket) socket.emit('userOffline', { userId: user.id });
       }
     };
-
     window.addEventListener('beforeunload', handleBeforeUnload);
-
     return () => {
       window.removeEventListener('beforeunload', handleBeforeUnload);
       disconnectSocket();
@@ -313,295 +251,182 @@ function ChatLayout() {
     dispatch(fetchChatList());
   }, [dispatch]);
 
-  // Subscribe to real-time messages for sidebar updates
+  /**
+   * Real-time Socket Event Handlers.
+   * Subscribes to incoming messages, typing statuses, and user presence updates.
+   */
   React.useEffect(() => {
     if (!user?.id) return;
-
     const unsubscribe = subscribeToMessages((err: Error | null, msg: any) => {
       if (err) return;
-      
-      // Handle Typing Events
-      if (msg.type === 'typing') {
-        dispatch(setTypingStatus({ chatId: String(msg.senderId), isTyping: true }));
-        return;
-      }
-      if (msg.type === 'stopTyping') {
-        dispatch(setTypingStatus({ chatId: String(msg.senderId), isTyping: false }));
-        return;
-      }
-
-      // Handle New Messages
+      if (msg.type === 'typing') { dispatch(setTypingStatus({ chatId: String(msg.senderId), isTyping: true })); return; }
+      if (msg.type === 'stopTyping') { dispatch(setTypingStatus({ chatId: String(msg.senderId), isTyping: false })); return; }
 			if (msg.type === 'newMessage') {
 				const isMine = String(msg.senderId) === String(user.id);
 				const sidebarChatId = isMine ? msg.receiverId : msg.senderId;
-
-        // Play notification sound for incoming messages (not calls, not mine)
         if (!isMine && msg.messageType !== 'CALL') {
           const notificationSound = new Audio('/message_notification.mp3');
           notificationSound.volume = 0.5;
-          notificationSound.play().catch(e => {
-            console.warn('Sound play failed (interaction required):', e.message);
-          });
+          notificationSound.play().catch(() => {});
         }
-
 				if (sidebarChatId) {
 					let displayMessage = (msg.isEncrypted && msg.text) ? msg.text : (msg.sidebarText || msg.text || '');
-					
-					// Special handling for CALL messages to show friendly sidebar text
 					if (msg.messageType === 'CALL') {
 						const isReceiver = String(msg.receiverId) === String(user.id);
 						const lowerText = msg.text?.toLowerCase() || '';
-						
-						if (lowerText.includes('missed') || lowerText === 'no answer') {
-							displayMessage = isReceiver 
-								? `Missed call from ${msg.sender?.name || 'User'}` 
-								: (lowerText === 'no answer' ? 'No answer' : 'Missed call');
-						} else if (lowerText.includes('declined')) {
-							displayMessage = isReceiver ? 'You declined the call' : `${msg.receiver?.name || 'User'} declined`;
-						} else {
-							displayMessage = msg.text || 'Audio call';
-						}
+						if (lowerText.includes('missed') || lowerText === 'no answer') displayMessage = isReceiver ? `Missed call from ${msg.sender?.name || 'User'}` : (lowerText === 'no answer' ? 'No answer' : 'Missed call');
+						else if (lowerText.includes('declined')) displayMessage = isReceiver ? 'You declined the call' : `${msg.receiver?.name || 'User'} declined`;
+						else displayMessage = msg.text || 'Audio call';
 					}
-					
 					dispatch(updateChatLastMessage({
-						chatId: String(sidebarChatId),
-						message: displayMessage,
-						time: msg.timestamp,
-						isMine: isMine,
-						sender: msg.sender,
-						receiver: msg.receiver,
-						isEncrypted: msg.isEncrypted,
-						lastMessageSenderId: String(msg.senderId),
-						lastMessageId: String(msg.id),
-						lastMessageType: msg.messageType,
-						isForwarded: !!msg.isForwarded
+						chatId: String(sidebarChatId), message: displayMessage, time: msg.timestamp, isMine: isMine, sender: msg.sender, receiver: msg.receiver, isEncrypted: msg.isEncrypted, lastMessageSenderId: String(msg.senderId), lastMessageId: String(msg.id), lastMessageType: msg.messageType, isForwarded: !!msg.isForwarded
 					}));
 				}
       } else if (msg.type === 'chatRequestAccepted') {
-        dispatch(updateChatStatus({
-          chatRoomId: msg.chatRoomId,
-          status: 'ACCEPTED'
-        }));
+        dispatch(updateChatStatus({ chatRoomId: msg.chatRoomId, status: 'ACCEPTED' }));
       } else if (msg.type === 'messageUpdated' || msg.type === 'messageDeleted') {
-        dispatch(updateChatPreview({
-          messageId: msg.id,
-          senderId: msg.senderId,
-          receiverId: msg.receiverId,
-          sidebarText: msg.sidebarText,
-          isMine: String(msg.senderId) === String(user?.id),
-          isEncrypted: msg.type === 'messageDeleted' ? false : undefined
-        }));
+        dispatch(updateChatPreview({ messageId: msg.id, senderId: msg.senderId, receiverId: msg.receiverId, sidebarText: msg.sidebarText, isMine: String(msg.senderId) === String(user?.id), isEncrypted: msg.type === 'messageDeleted' ? false : undefined }));
       }
     });
-
-      // Handle User Status (Online/Offline)
-      const socket = getSocket();
-      if (socket) {
-        socket.on('userStatus', (data: { userId: number; isOnline: boolean; lastSeen?: string }) => {
-          dispatch(setUserStatus({ 
-            userId: String(data.userId), 
-            isOnline: data.isOnline,
-            lastSeen: data.lastSeen 
-          }));
-        });
-      }
-
-      return () => {
-        if (unsubscribe) unsubscribe();
-        if (socket) socket.off('userStatus');
-      };
+    const socket = getSocket();
+    if (socket) {
+      socket.on('userStatus', (data: { userId: number; isOnline: boolean; lastSeen?: string }) => {
+        dispatch(setUserStatus({ userId: String(data.userId), isOnline: data.isOnline, lastSeen: data.lastSeen }));
+      });
+    }
+    return () => { if (unsubscribe) unsubscribe(); if (socket) socket.off('userStatus'); };
   }, [user?.id, dispatch]);
 
-  // Find selected user based on chatId (username) from URL
+  /**
+   * Syncs the selected chat state based on URL parameters.
+   */
   React.useEffect(() => {
     if (chatId) {
-      const chat = chats.find(c => c.username === chatId);
-      if (chat) {
-        setSelectedUser(chat);
-      } else {
-        // If not in chat list, try fetching user info
-        getUserByUsernameApi(chatId).then(user => {
-          setSelectedUser({
-            id: user.id.toString(),
-            name: user.name || user.username,
-            username: user.username,
-            avatar: user.avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.username}`,
-            online: user.isOnline,
-            unreadCount: 0
-          });
-        }).catch(() => {
-          setSelectedUser(undefined);
-        });
-      }
+      dispatch(fetchSelectedChat(chatId));
     } else {
-      setSelectedUser(undefined);
+      dispatch(setSelectedChat(null));
     }
-  }, [chatId, chats]);
+  }, [chatId, dispatch]);
 
   const isSettingsMenu = pathname === '/settings';
   const isSettingsContent = pathname === '/profile' || pathname === '/credentials';
   const isSettingsPage = isSettingsMenu || isSettingsContent;
 
-  // Dynamic Browser Title
   const pageTitle = React.useMemo(() => {
-    if (selectedUser) return `${selectedUser.name || selectedUser.username} | Folio-Messenger`;
+    if (selectedChat) return `${selectedChat.name || selectedChat.username} | Folio-Messenger`;
     if (pathname === '/profile') return `Profile | Folio-Messenger`;
     if (pathname === '/credentials') return `Account & Security | Folio-Messenger`;
     if (pathname === '/settings') return `Settings | Folio-Messenger`;
     return 'Folio-Messenger';
-  }, [selectedUser, pathname]);
-
+  }, [selectedChat, pathname]);
   usePageTitle(pageTitle);
 
   return (
     <div className="flex h-full bg-background overflow-hidden">
-      {/* Sidebar - hidden on mobile when a chat or settings content is selected */}
+      {/* Navigation Sidebar */}
       <div className={cn(
         "w-full lg:w-[400px] border-r flex flex-col shrink-0",
-        chatId || isSettingsContent ? "hidden lg:flex" : "flex"
+        (chatId || isSettingsContent) ? "hidden lg:flex" : "flex"
       )}>
-        <ChatSidebar chats={chats} activeChatId={chatId} />
+        <React.Suspense fallback={<ChatSidebarSkeleton />}>
+          <ChatSidebar chats={chats} activeChatId={chatId} />
+        </React.Suspense>
       </div>
 
-      {/* Main Content */}
+      {/* Main Content Area */}
       <div className={cn(
         "flex-1 flex flex-col min-w-0 h-full relative overflow-hidden",
         !chatId && !isSettingsContent ? "hidden lg:flex" : "flex"
       )}>
-        {isSettingsPage ? (
-          <div className="flex-1 overflow-y-auto p-4 lg:p-10 bg-background">
-            <div className="max-w-3xl mx-auto">
-              <div className="flex items-center gap-4 mb-8">
-                <Button 
-                  variant="ghost" 
-                  size="icon" 
-                  onClick={() => {
-                    if (isSettingsContent) {
-                      navigate('/settings');
-                    } else {
-                      navigate('/');
-                    }
-                  }} 
-                  className="lg:hidden"
-                >
+        <React.Suspense fallback={<ChatWindowSkeleton />}>
+          {isSettingsPage ? (
+            <div className="flex-1 flex flex-col h-full bg-[hsl(var(--sidebar-bg))]">
+              <div className="h-[60px] bg-[hsl(var(--sidebar-header-bg))] px-4 flex items-center lg:hidden shrink-0 border-b">
+                <Button variant="ghost" size="icon" onClick={() => navigate('/')} className="mr-2 h-9 w-9 rounded-full">
                   <FontAwesomeIcon icon={faArrowLeft} />
                 </Button>
-                <h1 className="text-3xl font-bold tracking-tight">
-                  {pathname === '/profile' ? 'Profile' : 
-                   pathname === '/credentials' ? 'Account & Security' : 'Settings'}
-                </h1>
+                <h3 className="text-lg font-bold">Settings</h3>
               </div>
-              
-              <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-                <Card className="border border-border/50 shadow-md bg-card overflow-hidden">
-                  <CardContent className="p-6 lg:p-10">
-                    {pathname === '/credentials' ? <CredentialsSettings /> : <ProfileSettings />}
-                  </CardContent>
-                </Card>
+              <div className="flex-1 overflow-y-auto p-4 lg:p-10 bg-background">
+                <div className="max-w-2xl mx-auto">
+                  <Routes>
+                    <Route path="/profile" element={<ProfileSettings />} />
+                    <Route path="/credentials" element={<CredentialsSettings />} />
+                    <Route path="/settings" element={
+                      <div className="space-y-6">
+                        <h2 className="text-2xl font-bold mb-4">Settings</h2>
+                        <Card className="border-none shadow-none bg-black/5 dark:bg-white/5">
+                          <CardContent className="p-6">
+                            <p className="text-muted-foreground">Select a setting from the sidebar to manage your account.</p>
+                          </CardContent>
+                        </Card>
+                      </div>
+                    } />
+                  </Routes>
+                </div>
               </div>
             </div>
-          </div>
-        ) : selectedUser ? (
-          <ChatWindow 
-            chat={selectedUser} 
-            onStartAudioCall={(c) => startCall({ id: c.id, name: c.name, username: c.username, avatar: c.avatar }, 'audio')}
-            onStartVideoCall={(c) => startCall({ id: c.id, name: c.name, username: c.username, avatar: c.avatar }, 'video')} 
-            callState={callState}
-            callPartner={callPartner}
-            isMuted={isMuted}
-            acceptCall={acceptCall}
-            rejectCall={rejectCall}
-            endCall={endCall}
-            toggleMute={toggleMute}
-          />
-        ) : (
-          <div className="flex-1 flex flex-col items-center justify-center text-muted-foreground p-8 text-center bg-accent/5">
-            <div className="w-24 h-24 bg-primary/10 rounded-3xl flex items-center justify-center mb-6 overflow-hidden">
-               <img src="/logo.jpg" alt="Folio-Messenger Logo" className="w-full h-full object-cover" />
+          ) : (chatId) ? (
+             isLoadingSelectedChat || (selectedChat?.username !== chatId) ? (
+               <ChatWindowSkeleton />
+             ) : (
+               <ChatWindow 
+                chat={selectedChat!} 
+                onStartAudioCall={(c) => startCall({ id: c.id, name: c.name, username: c.username, avatar: c.avatar }, 'audio')}
+                onStartVideoCall={(c) => startCall({ id: c.id, name: c.name, username: c.username, avatar: c.avatar }, 'video')} 
+              />
+             )
+          ) : (
+            <div className="flex-1 flex flex-col items-center justify-center p-8 text-center bg-[hsl(var(--chat-bg))] relative overflow-hidden group">
+              <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-primary/5 rounded-full blur-[100px] -mr-64 -mt-64 transition-all duration-1000 group-hover:bg-primary/10" />
+              <div className="absolute bottom-0 left-0 w-[500px] h-[500px] bg-primary/5 rounded-full blur-[100px] -ml-64 -mb-64 transition-all duration-1000 group-hover:bg-primary/10" />
+              <div className="relative flex flex-col items-center max-w-sm animate-in fade-in zoom-in duration-700">
+                <div className="w-24 h-24 mb-8 relative">
+                  <div className="absolute inset-0 bg-primary/10 rounded-full animate-ping duration-[3000ms]" />
+                  <img src="/logo.jpg" alt="Folio-Messenger" className="w-full h-full rounded-full object-cover border-4 border-background shadow-2xl relative z-10" />
+                </div>
+                <h2 className="text-3xl font-black mb-3 tracking-tight text-foreground">Folio-Messenger</h2>
+                <p className="text-muted-foreground leading-relaxed">
+                  Select a contact to start messaging securely with <span className="text-primary font-bold">End-to-End Encryption</span>.
+                </p>
+                <div className="mt-8 flex gap-3">
+                   <div className="px-4 py-2 rounded-full bg-primary/10 border border-primary/20 text-primary text-xs font-bold uppercase tracking-widest">Secure</div>
+                   <div className="px-4 py-2 rounded-full bg-primary/10 border border-primary/20 text-primary text-xs font-bold uppercase tracking-widest">Private</div>
+                </div>
+              </div>
             </div>
-            <h2 className="text-2xl font-semibold text-foreground mb-2">Folio-Messenger</h2>
-            <p className="max-w-md">Select a conversation or start a new one to begin messaging. Your messages are end-to-end encrypted.</p>
-          </div>
-        )}
+          )}
+        </React.Suspense>
       </div>
- 
-      <CallOverlay
-        state={callState as any}
-        partner={callPartner}
-        isMuted={isMuted}
-        onAccept={acceptCall}
-        onReject={rejectCall}
-        onEnd={endCall}
-        onToggleMute={toggleMute}
-        callType={callType}
-        localStream={localStream}
-        remoteStream={remoteStream}
-      />
+
+      {/* Global Call UI Overlay */}
+      {callState !== 'IDLE' && (
+        <CallOverlay
+          state={callState as any} partner={callPartner} isMuted={isMuted} onAccept={acceptCall} onReject={rejectCall} onEnd={endCall} onToggleMute={toggleMute} callType={callType} localStream={localStream} remoteStream={remoteStream}
+        />
+      )}
     </div>
   );
 }
 
+/**
+ * Root Application Component.
+ * Defines the main routing structure and protected access layers.
+ */
 function App() {
   return (
     <Router>
-      <Routes>
-        <Route 
-          path="/login" 
-          element={
-            <PublicRoute>
-              <AuthPage initialIsLogin={true} />
-            </PublicRoute>
-          } 
-        />
-        <Route 
-          path="/signup" 
-          element={
-            <PublicRoute>
-              <AuthPage initialIsLogin={false} />
-            </PublicRoute>
-          } 
-        />
-        <Route 
-          path="/" 
-          element={
-            <ProtectedRoute>
-              <ChatLayout />
-            </ProtectedRoute>
-          } 
-        />
-        <Route 
-          path="/messages/:chatId" 
-          element={
-            <ProtectedRoute>
-              <ChatLayout />
-            </ProtectedRoute>
-          } 
-        />
-        <Route 
-          path="/profile" 
-          element={
-            <ProtectedRoute>
-              <ChatLayout />
-            </ProtectedRoute>
-          } 
-        />
-        <Route 
-          path="/credentials" 
-          element={
-            <ProtectedRoute>
-              <ChatLayout />
-            </ProtectedRoute>
-          } 
-        />
-        <Route 
-          path="/settings" 
-          element={
-            <ProtectedRoute>
-              <ChatLayout />
-            </ProtectedRoute>
-          } 
-        />
-      </Routes>
+      <React.Suspense fallback={<LoadingScreen />}>
+        <Routes>
+          <Route path="/login" element={<PublicRoute><AuthPage initialIsLogin={true} /></PublicRoute>} />
+          <Route path="/signup" element={<PublicRoute><AuthPage initialIsLogin={false} /></PublicRoute>} />
+          <Route path="/" element={<ProtectedRoute><ChatLayout /></ProtectedRoute>} />
+          <Route path="/messages/:chatId" element={<ProtectedRoute><ChatLayout /></ProtectedRoute>} />
+          <Route path="/profile" element={<ProtectedRoute><ChatLayout /></ProtectedRoute>} />
+          <Route path="/credentials" element={<ProtectedRoute><ChatLayout /></ProtectedRoute>} />
+          <Route path="/settings" element={<ProtectedRoute><ChatLayout /></ProtectedRoute>} />
+        </Routes>
+      </React.Suspense>
     </Router>
   );
 }

@@ -56,7 +56,6 @@ export const initiateSocketConnection = (userId: string | number, token: string)
 		query: { userId: userId.toString() },
 		auth: { token }
 	});
-	console.log(`Connecting socket for user: ${userId}...`);
 	setupGlobalListeners();
 };
 
