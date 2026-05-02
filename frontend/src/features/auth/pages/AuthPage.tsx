@@ -27,13 +27,6 @@ export function AuthPage({ initialIsLogin = true }: { initialIsLogin?: boolean }
       <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-primary/10 rounded-full blur-[100px]" />
       
       <div className="w-full max-w-md space-y-8 relative z-10">
-        <div className="flex flex-col items-center">
-          <div className="w-20 h-20 bg-primary/10 rounded-2xl flex items-center justify-center mb-4 overflow-hidden border border-primary/20 shadow-lg">
-            <img src="/logo.jpg" alt="Folio-Messenger Logo" className="w-full h-full object-cover" />
-          </div>
-          <h1 className="text-3xl font-bold tracking-tight text-foreground">Folio-Messenger</h1>
-          <p className="text-sm text-muted-foreground mt-2">Secure & Seamless Communication</p>
-        </div>
 
         <div className="transform transition-all duration-500 ease-in-out">
           {isLogin ? (
